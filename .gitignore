@@ -1,0 +1,17 @@
+/landcover_env
+/data/train/**/patches*/
+/logs/
+**/logs/
+data/test/images/*.tif
+data/test/masks/*.tif
+data/train/images/*.tif
+data/train/masks/*.tif
+data/test/images/*.png
+data/test/masks/*.png
+data/train/images/*.png
+data/train/masks/*.png
+output/*
+src/__pycache__/
+src/output/model_comparison/*
+src/utils/__pycache__
+models/*

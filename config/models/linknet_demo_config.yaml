@@ -1,0 +1,47 @@
+dirs:
+  data_dir: data
+  image_dir: images
+  log_dir: logs
+  mask_dir: masks
+  model_dir: models
+  output_dir: output/linknet_demo
+  pred_mask_dir: predicted_masks
+  pred_plot_dir: prediction_plots
+  test_dir: test
+  train_dir: train
+vars:
+  activation: softmax2d
+  all_classes:
+  - background
+  - building
+  - woodland
+  - water
+  - road
+  batch_size: 4
+  device: cpu
+  discard_rate: 0.95
+  encoder: efficientnet-b0
+  encoder_weights: imagenet
+  epochs: 3
+  file_type: .tif
+  init_lr: 0.0003
+  log_level: DEBUG
+  lr_reduce_threshold: 0.0001
+  minimum_lr: 0
+  model_arch: Linknet
+  model_name: trained_landcover_linknet_efficientnet-b0_epochs20_patch512_batch16.pth
+  optimizer_choice: Adam
+  patch_size: 256
+  patience_epochs_before_reducing_lr: 5
+  reduce_lr_by_factor: 0.5
+  test_classes:
+  - background
+  - building
+  - water
+  test_log_name: linknet_demo_test.log
+  train_classes:
+  - background
+  - building
+  - woodland
+  - water
+  train_log_name: linknet_demo_train.log
