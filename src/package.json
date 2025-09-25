@@ -1,0 +1,6 @@
+{
+  "dependencies": {
+    "pandas": "^0.0.3",
+    "seaborn": "^0.0.1-security"
+  }
+}

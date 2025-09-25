@@ -15,3 +15,4 @@ src/__pycache__/
 src/output/model_comparison/*
 src/utils/__pycache__
 models/*
+venv

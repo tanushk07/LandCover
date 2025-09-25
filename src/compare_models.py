@@ -64,7 +64,7 @@ def compare_models(models_to_compare, test_only=False, save_results=True):
     if not test_only:
         print("\n📚 Phase 1: Training Models")
         print("-" * 40)
-        
+        model_dir = Path("path_to_model_dir")
         for i, model_name in enumerate(models_to_compare, 1):
             try:
                 print(f"\n[{i}/{len(models_to_compare)}] Training {model_name.upper()}...")
