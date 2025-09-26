@@ -34,3 +34,4 @@ vars:
   train_classes: ["background", "building", "woodland", "water"]
   test_classes: ["background", "building", "water"]
   use_amp: True # Add this line for mixed precision
+  is_transformer: true

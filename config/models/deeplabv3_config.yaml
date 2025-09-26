@@ -34,3 +34,4 @@ vars:
   all_classes: ["background", "building", "woodland", "water", "road"]
   train_classes: ["background", "building", "woodland", "water"]
   test_classes: ["background", "building", "water"]
+  is_transformer: false

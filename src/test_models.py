@@ -153,8 +153,15 @@ def test_model(model_name, with_metrics=True):
     
     # Check if it's a transformer model
     transformer_models = ['SegFormer', 'ViTSeg', 'HybridCNNTransformer']
-    is_transformer = model_arch in transformer_models
+        # Check if it's a transformer model (now fully configurable via YAML)
+    is_transformer = slice_config['vars'].get('is_transformer', False)
+    if is_transformer:
+        def _transformer_preproc(x, **kwargs): return x.astype('float32') / 255.0
+        preprocessing_fn = _transformer_preproc
+    else:
+        preprocessing_fn = smp.encoders.get_preprocessing_fn(encoder, encoder_weights)
 
+    model = torch.load(model_path, map_location=torch.device(device), weights_only=False)
     # output directories
     output_base_dir = ROOT / slice_config['dirs']['output_dir']
     pred_mask_dir = output_base_dir / slice_config['dirs']['pred_mask_dir']
@@ -173,8 +180,8 @@ def test_model(model_name, with_metrics=True):
     print(f"📁 Using model: {model_name_file}")
     logger.info(f"Testing {model_arch} model using {model_name_file}")
 
-    preprocessing_fn = smp.encoders.get_preprocessing_fn(encoder, encoder_weights)
-    model = torch.load(model_path, map_location=torch.device(device))
+    # preprocessing_fn = smp.encoders.get_preprocessing_fn(encoder, encoder_weights)
+    # model = torch.load(model_path, map_location=torch.device(device), weights_only=False)
 
     class_values = [Constants.CLASSES.value.index(cls.lower()) for cls in classes]
     num_classes = len(class_values)
