@@ -192,7 +192,10 @@ def train_model(model_name):
     best_model_path = None
     max_score = 0
     best_epoch = 0
-
+    default_metrics = [
+    smp.utils.metrics.IoU(threshold=0.5),    # mean IoU
+    smp.utils.metrics.Fscore(),              # Dice score
+    ]
     for epoch in range(epochs):
         print(f"\n📊 Epoch {epoch+1}/{epochs}")
         if model_arch in transformer_models:
@@ -201,8 +204,9 @@ def train_model(model_name):
             current_score = valid_logs['pixel_accuracy']
             score_name = 'pixel_accuracy'
         else:
-            train_epoch = smp.utils.train.TrainEpoch(model, loss=loss, optimizer=optimizer, device=device, verbose=True)
-            valid_epoch = smp.utils.train.ValidEpoch(model, loss=loss, device=device, verbose=True)
+            
+            train_epoch = smp.utils.train.TrainEpoch(model, loss=loss,  metrics=default_metrics,optimizer=optimizer, device=device, verbose=True)
+            valid_epoch = smp.utils.train.ValidEpoch(model, loss=loss, metrics=default_metrics, device=device, verbose=True)
             train_logs = train_epoch.run(train_loader)
             valid_logs = valid_epoch.run(valid_loader)
             current_score = valid_logs['iou_score']

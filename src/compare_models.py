@@ -19,10 +19,32 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 from pathlib import Path
 
+import numpy as np
+
 # Import model training/testing (only test will be used when models exist)
 from train_model import train_model
 from test_models import test_model
 
+
+# Metric weights for overall score
+METRIC_WEIGHTS = {
+    'mean_iou': 1.0,
+    'mean_dice': 0.9,
+    'pixel_accuracy': 0.7,
+    'mean_pixel_accuracy': 0.7,
+    'frequency_weighted_iou': 0.4,
+    'map_50': 0.3,
+    'map_75': 0.3
+}
+METRIC_COLUMN_MAP = {
+    'mean_iou': 'Mean IoU',
+    'mean_dice': 'Mean Dice',
+    'pixel_accuracy': 'Pixel Accuracy',
+    'mean_pixel_accuracy': 'Mean Pixel Accuracy',
+    'frequency_weighted_iou': 'Frequency Weighted IoU',
+    'map_50': 'mAP@50',
+    'map_75': 'mAP@75'
+}
 
 def get_available_models():
     """Get list of available model configurations."""
@@ -58,7 +80,7 @@ def compare_models(models_to_compare, test_only=False, save_results=True):
         }
     }
     
-    model_dir = Path("models")
+    model_dir = Path(__file__).resolve().parent.parent / "models"
     model_dir.mkdir(parents=True, exist_ok=True)
 
     # Training Phase (actually skipping if model exists)
@@ -70,8 +92,11 @@ def compare_models(models_to_compare, test_only=False, save_results=True):
                 print(f"\n[{i}/{len(models_to_compare)}] {model_name.upper()}...")
 
                 # Look for any .pth files containing the model name
-                matching_models = [f for f in model_dir.glob("*.pth") if model_name.lower() in f.name.lower()]
-
+                normalized_model_name = model_name.lower().replace("-", "_").replace(" ", "")
+                matching_models = [
+                    f for f in model_dir.glob("*.pth")
+                    if normalized_model_name in f.name.lower().replace("-", "_").replace(" ", "")
+                ]
 
                 if matching_models:
                     print(f"⏭️  {model_name.upper()} skipped — found trained model: {matching_models[0].name}")
@@ -134,55 +159,110 @@ def compare_models(models_to_compare, test_only=False, save_results=True):
             }
     
     # Analysis Phase
+    # Analysis Phase
     print("\n📊 Phase 3: Analysis & Comparison")
     print("-" * 40)
-    
+
     successful_models = [m for m in models_to_compare if 'error' not in results['test_results'].get(m, {})]
-    
+
     if successful_models:
-        # Create comparison summary
         comparison_data = []
         for model_name in successful_models:
             test_res = results['test_results'][model_name]
             train_res = results['training_results'].get(model_name, {})
-            
+
             comparison_data.append({
                 'Model': model_name.upper(),
                 'Mean IoU': test_res.get('mean_iou', 0),
                 'Pixel Accuracy': test_res.get('pixel_accuracy', 0),
+                'Mean Pixel Accuracy': test_res.get('mean_pixel_accuracy', 0),
+                'Frequency Weighted IoU': test_res.get('frequency_weighted_iou', 0),
+                'Mean Dice': test_res.get('mean_dice', 0),
                 'mAP@50': test_res.get('map_50', 0),
                 'mAP@75': test_res.get('map_75', 0),
-                'Mean Dice': test_res.get('mean_dice', 0),
                 'Training IoU': train_res.get('best_iou_score'),
                 'Training Time (min)': (train_res.get('training_time_seconds') or 0) / 60,
                 'Test Time (sec)': test_res.get('test_time_seconds', 0)
             })
-        
-        # Convert to DataFrame for analysis
+
         df = pd.DataFrame(comparison_data)
-        df = df.sort_values('Mean IoU', ascending=False)
-        
+
+        # Determine best model per metric
+        best_per_metric = {}
+        for metric in METRIC_WEIGHTS.keys():
+            if metric in df.columns:
+                best_row = df.loc[df[metric].idxmax()]
+                best_per_metric[metric] = {
+                    'model': best_row['Model'],
+                    'score': best_row[metric]
+                }
+
+        # Compute weighted overall score
+        def weighted_score(row):
+            score = 0
+            weight_sum = 0
+            for metric, weight in METRIC_WEIGHTS.items():
+                col = METRIC_COLUMN_MAP.get(metric, metric)
+                if col in row:
+                    score += row[col] * weight
+                    weight_sum += weight
+            return score / weight_sum if weight_sum > 0 else 0
+
+
+        df['Weighted Score'] = df.apply(weighted_score, axis=1)
+        best_overall_row = df.loc[df['Weighted Score'].idxmax()]
+
         results['comparison_summary'] = {
-            'best_model_by_iou': df.iloc[0]['Model'].lower(),
-            'best_mean_iou': df.iloc[0]['Mean IoU'],
-            'ranking': df[['Model', 'Mean IoU', 'Pixel Accuracy', 'mAP@50']].to_dict('records')
+            'best_per_metric': best_per_metric,
+            'best_model_overall': {
+                'model': best_overall_row['Model'],
+                'weighted_score': best_overall_row['Weighted Score']
+            },
+            'full_ranking': df.sort_values('Weighted Score', ascending=False).to_dict('records')
         }
-        
+
         # Print results
         print("\n🏆 Model Comparison Results:")
         print(df.to_string(index=False, float_format='%.4f'))
-        
+
         # Save results
         if save_results:
             save_comparison_results(results, df)
             create_comparison_plots(df, results['experiment_info']['timestamp'])
-    
+
+            # --- NEW: Bar chart for Weighted Score ---
+            import matplotlib.pyplot as plt
+            plt.figure(figsize=(8,5))
+            plt.bar(df['Model'], df['Weighted Score'], color="skyblue")
+            plt.title("Final Weighted Scores (Overall Model Performance)")
+            plt.ylabel("Weighted Score")
+            plt.xticks(rotation=30, ha="right")
+            plt.tight_layout()
+            plt.savefig(f"output/model_comparison/weighted_scores_{results['experiment_info']['timestamp']}.png")
+            plt.close()
     else:
         print("❌ No models completed successfully for comparison.")
+
     
     print(f"\n✅ Comparison completed! Results saved to output/model_comparison/")
     return results
 
+def make_json_safe(obj):
+    """Convert numpy types to native Python types for json.dump compatibility."""
+    if isinstance(obj, (np.integer, np.int64, np.int32)):
+        return int(obj)
+    if isinstance(obj, (np.floating, np.float64, np.float32)):
+        return float(obj)
+    if isinstance(obj, np.ndarray):
+        return obj.tolist()
+    # fallback for pandas types
+    try:
+        import pandas as pd
+        if isinstance(obj, (pd.Timestamp,)):
+            return str(obj)
+    except Exception:
+        pass
+    raise TypeError(f"Type {type(obj)} not serializable")
 
 def save_comparison_results(results, df):
     """Save comparison results to files."""
@@ -193,7 +273,7 @@ def save_comparison_results(results, df):
     
     json_file = output_dir / f"comparison_results_{timestamp}.json"
     with open(json_file, 'w') as f:
-        json.dump(results, f, indent=2)
+        json.dump(results, f, indent=2,default=make_json_safe)
     
     csv_file = output_dir / f"model_comparison_summary_{timestamp}.csv"
     df.to_csv(csv_file, index=False)
@@ -202,20 +282,33 @@ def save_comparison_results(results, df):
 
 
 def create_comparison_plots(df, timestamp):
-    """Create visualization plots for model comparison."""
+    """Create visualization plots for all metrics."""
     output_dir = Path("output/model_comparison")
     plt.style.use('default')
     sns.set_palette("husl")
     
-    # Mean IoU
-    fig, ax = plt.subplots(figsize=(8,6))
-    ax.bar(df['Model'], df['Mean IoU'], color='skyblue')
-    ax.set_title('Mean IoU by Model')
-    ax.set_ylabel('Mean IoU')
+    metrics_to_plot = [
+        'Mean IoU', 'Pixel Accuracy', 'Mean Pixel Accuracy', 
+        'Frequency Weighted IoU', 'Mean Dice', 'mAP@50', 'mAP@75'
+    ]
+    
+    fig, ax = plt.subplots(figsize=(10,6))
+    width = 0.1  # width of bars
+    x = range(len(df['Model']))
+    
+    for i, metric in enumerate(metrics_to_plot):
+        if metric in df.columns:
+            ax.bar([p + i*width for p in x], df[metric], width=width, label=metric)
+
+    ax.set_xticks([p + width*len(metrics_to_plot)/2 for p in x])
+    ax.set_xticklabels(df['Model'])
+    ax.set_ylabel('Metric Value')
+    ax.set_title('Segmentation Model Performance Comparison')
+    ax.legend()
     plt.tight_layout()
-    plt.savefig(output_dir / f"performance_comparison_{timestamp}.png", dpi=300)
+    plt.savefig(output_dir / f"performance_comparison_all_metrics_{timestamp}.png", dpi=300)
     plt.close()
-    print(f"📊 Plot saved: performance_comparison_{timestamp}.png")
+    print(f"📊 Plot saved: performance_comparison_all_metrics_{timestamp}.png")
 
 
 if __name__ == "__main__":
@@ -247,8 +340,9 @@ if __name__ == "__main__":
     results = compare_models(models_to_compare, test_only=args.test_only)
     
     if results['comparison_summary']:
-        best_model = results['comparison_summary']['best_model_by_iou']
-        best_score = results['comparison_summary']['best_mean_iou']
-        print(f"\n🏆 Winner: {best_model.upper()} with Mean IoU: {best_score:.4f}")
+        best_model = results['comparison_summary']['best_model_overall']['model']
+        best_score = results['comparison_summary']['best_model_overall']['weighted_score']
+        print(f"\n🏆 Winner: {best_model.upper()} with Weighted Score: {best_score:.4f}")
+
     else:
         print("\n❌ Comparison could not be completed.")

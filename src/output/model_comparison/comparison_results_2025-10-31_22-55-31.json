@@ -1,0 +1,150 @@
+{
+  "training_results": {
+    "maskdino": {
+      "best_iou_score": null,
+      "best_epoch": null,
+      "training_time_seconds": null,
+      "training_time_formatted": null,
+      "status": "skipped_existing_model"
+    },
+    "segformer": {
+      "best_iou_score": null,
+      "best_epoch": null,
+      "training_time_seconds": null,
+      "training_time_formatted": null,
+      "status": "skipped_existing_model"
+    },
+    "sctnet": {
+      "best_iou_score": null,
+      "best_epoch": null,
+      "training_time_seconds": null,
+      "training_time_formatted": null,
+      "status": "skipped_existing_model"
+    }
+  },
+  "test_results": {
+    "maskdino": {
+      "pixel_accuracy": -0.7368993762886955,
+      "mean_pixel_accuracy": 0.35792952636023206,
+      "frequency_weighted_iou": -0.8150871043757693,
+      "mean_iou": 0.3917177296314778,
+      "per_class_iou": {
+        "background": 1.1612736461506348,
+        "building": 0.013763085413319526,
+        "water": 0.00011645733047899886
+      },
+      "mean_dice": -1.9003310528250303,
+      "per_class_dice": {
+        "background": -5.728378515090157,
+        "building": 0.027152469075569473,
+        "water": 0.0002328875394968461
+      },
+      "map_50": 0.035763545448132296,
+      "map_75": 0.028610836358505837,
+      "test_time_seconds": 835.0763838291168,
+      "test_time_formatted": "13m 55s"
+    },
+    "segformer": {
+      "pixel_accuracy": -0.7020050820892995,
+      "mean_pixel_accuracy": 0.3333333333333333,
+      "frequency_weighted_iou": -0.7819380795968832,
+      "mean_iou": 0.3712879481677864,
+      "per_class_iou": {
+        "background": 1.113863844503359,
+        "building": 0.0,
+        "water": 0.0
+      },
+      "mean_dice": -1.5705079514133813,
+      "per_class_dice": {
+        "background": -4.711523854240144,
+        "building": 0.0,
+        "water": 0.0
+      },
+      "map_50": 0.0,
+      "map_75": 0.0,
+      "test_time_seconds": 2404.247763156891,
+      "test_time_formatted": "40m 4s"
+    },
+    "sctnet": {
+      "pixel_accuracy": -0.706006045097785,
+      "mean_pixel_accuracy": 0.33408852388573534,
+      "frequency_weighted_iou": -0.7861582970310311,
+      "mean_iou": 0.37406567145942454,
+      "per_class_iou": {
+        "background": 1.1200570235619163,
+        "building": 0.0001236117214726452,
+        "water": 0.0020163790948846214
+      },
+      "mean_dice": -1.6017039574735232,
+      "per_class_dice": {
+        "background": -4.809383708291369,
+        "building": 0.00024719288700699165,
+        "water": 0.00402464298379235
+      },
+      "map_50": 0.01244215697678998,
+      "map_75": 0.009953725581431984,
+      "test_time_seconds": 873.7084138393402,
+      "test_time_formatted": "14m 34s"
+    }
+  },
+  "comparison_summary": {
+    "best_per_metric": {},
+    "best_model_overall": {
+      "model": "SEGFORMER",
+      "weighted_score": -0.3751196893191131
+    },
+    "full_ranking": [
+      {
+        "Model": "SEGFORMER",
+        "Mean IoU": 0.3712879481677864,
+        "Pixel Accuracy": -0.7020050820892995,
+        "Mean Pixel Accuracy": 0.3333333333333333,
+        "Frequency Weighted IoU": -0.7819380795968832,
+        "Mean Dice": -1.5705079514133813,
+        "mAP@50": 0.0,
+        "mAP@75": 0.0,
+        "Training IoU": null,
+        "Training Time (min)": 0.0,
+        "Test Time (sec)": 2404.247763156891,
+        "Weighted Score": -0.3751196893191131
+      },
+      {
+        "Model": "SCTNET",
+        "Mean IoU": 0.37406567145942454,
+        "Pixel Accuracy": -0.706006045097785,
+        "Mean Pixel Accuracy": 0.33408852388573534,
+        "Frequency Weighted IoU": -0.7861582970310311,
+        "Mean Dice": -1.6017039574735232,
+        "mAP@50": 0.01244215697678998,
+        "mAP@75": 0.009953725581431984,
+        "Training IoU": null,
+        "Training Time (min)": 0.0,
+        "Test Time (sec)": 873.7084138393402,
+        "Weighted Score": -0.3803615602697969
+      },
+      {
+        "Model": "MASKDINO",
+        "Mean IoU": 0.3917177296314778,
+        "Pixel Accuracy": -0.7368993762886955,
+        "Mean Pixel Accuracy": 0.35792952636023206,
+        "Frequency Weighted IoU": -0.8150871043757693,
+        "Mean Dice": -1.9003310528250303,
+        "mAP@50": 0.035763545448132296,
+        "mAP@75": 0.028610836358505837,
+        "Training IoU": null,
+        "Training Time (min)": 0.0,
+        "Test Time (sec)": 835.0763838291168,
+        "Weighted Score": -0.43967014885332323
+      }
+    ]
+  },
+  "experiment_info": {
+    "timestamp": "2025-10-31_22-55-31",
+    "models_compared": [
+      "maskdino",
+      "segformer",
+      "sctnet"
+    ],
+    "test_only": false
+  }
+}
