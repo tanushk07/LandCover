@@ -250,34 +250,76 @@ def test_model(model_name, with_metrics=True):
                 raise e
 
             # model prediction
+            # model prediction (fixed overlapping patch averaging)
             try:
-                for i in tqdm(range(0, patches.shape[0]), desc="Predicting patches", leave=False):
-                    for j in range(0, patches.shape[1]):
-                        img_patch = preprocessing_fn(patches[i, j, :, :, :])
-                        img_patch = img_patch.transpose(2, 0, 1).astype('float32')
-                        x_tensor = torch.from_numpy(img_patch).to(device).unsqueeze(0)
-                        pred_mask = model.predict(x_tensor)
-                        pred_mask = pred_mask.squeeze().cpu().numpy().round()
-                        pred_mask = pred_mask.transpose(1, 2, 0)
-                        pred_mask = pred_mask.argmax(2)
-                        mask_patches[i, j, :, :] = pred_mask
+                # --- Create accumulation buffers for class probabilities ---
+                # --- Initialize accumulation buffers ---
+                with torch.no_grad():
+                    dummy = model(torch.zeros((1, 3, patch_size, patch_size), device=device))
+                    num_classes = dummy.shape[1] if len(dummy.shape) == 4 else 1
+                    del dummy
+                    torch.cuda.empty_cache()
+
+                acc = np.zeros((num_classes, image_padded.shape[0], image_padded.shape[1]), dtype=np.float32)
+                weight = np.zeros((image_padded.shape[0], image_padded.shape[1]), dtype=np.float32)
+
+                model.eval()
+                overlap = patch_size // 2
+                sigma = patch_size / 8.0  # smooth Gaussian-like blending
+
+                yy, xx = np.mgrid[0:patch_size, 0:patch_size]
+                gauss_mask = np.exp(-((xx - patch_size / 2) ** 2 + (yy - patch_size / 2) ** 2) / (2 * sigma ** 2))
+                gauss_mask = gauss_mask / gauss_mask.max()  # normalize
+
+                for i in tqdm(range(patches.shape[0]), desc="Predicting patches", leave=False):
+                    for j in range(patches.shape[1]):
+                        patch = preprocessing_fn(patches[i, j, :, :, :]).transpose(2, 0, 1).astype("float32")
+                        x_tensor = torch.from_numpy(patch).unsqueeze(0).to(device)
+
+                        with torch.amp.autocast("cuda",enabled= True):
+                            pred = model(x_tensor)
+                            if num_classes > 1:
+                                probs = torch.softmax(pred, dim=1)
+                            else:
+                                probs = torch.sigmoid(pred)
+
+                        probs = probs.detach().squeeze(0).cpu().numpy()  # shape: (C, H, W)
+                        y0, x0 = i * overlap, j * overlap
+
+                        # weighted accumulation using Gaussian mask
+                        for c in range(num_classes):
+                            acc[c, y0:y0 + patch_size, x0:x0 + patch_size] += probs[c] * gauss_mask
+                        weight[y0:y0 + patch_size, x0:x0 + patch_size] += gauss_mask
+
+                # Normalize accumulated probabilities
+                weight_safe = np.maximum(weight, 1e-6)
+                pred_avg = acc / weight_safe[np.newaxis, :, :]
+
+                # Derive final mask
+                if num_classes > 1:
+                    pred_mask = np.argmax(pred_avg, axis=0).astype(np.uint8)
+                else:
+                    pred_mask = (pred_avg[0] > 0.5).astype(np.uint8)
+
+                pred_mask = pred_mask[:image.shape[0], :image.shape[1]]
+
+
             except Exception as e:
                 logger.error(f"Could not predict image file {filename}!")
                 raise e
 
+
             # unpatch and unpad
-            try:
-                pred_mask = unpatchify(mask_patches, image_padded.shape[:-1])
-                pred_mask = pred_mask[:image.shape[0], :image.shape[1]]
-            except Exception as e:
-                logger.error("Could not reconstruct predicted mask!")
-                raise e
+            # try:
+            #     pred_mask = unpatchify(mask_patches, image_padded.shape[:-1])
+            #     pred_mask = pred_mask[:image.shape[0], :image.shape[1]]
+            # except Exception as e:
+            #     logger.error("Could not reconstruct predicted mask!")
+            #     raise e
             
             # filter classes
             try:
-                pred_masks = [(pred_mask == v) for v in class_values]
-                pred_mask = np.stack(pred_masks, axis=-1).astype('float')
-                pred_mask = pred_mask.argmax(2)
+                pred_mask = pred_mask.astype(np.uint8)
             except Exception as e:
                 logger.error("Could not filter classes from predicted mask!")
                 raise e
@@ -301,7 +343,7 @@ def test_model(model_name, with_metrics=True):
             except Exception as e:
                 logger.error("Could not save visualization!")
                 raise e
-
+            torch.cuda.empty_cache()
             # Calculate metrics if requested
             if with_metrics:
                 try:
@@ -334,21 +376,39 @@ def test_model(model_name, with_metrics=True):
                     all_metrics['per_image_metrics'].append(image_metrics)
                     
                     # Store masks for overall metrics calculation
-                    all_gt_masks.append(gt_mask.flatten())
-                    all_pred_masks.append(pred_mask.flatten())
-                    
+                    all_gt_masks.append(gt_mask.flatten().astype(np.int32))
+                    all_pred_masks.append(pred_mask.flatten().astype(np.int32))
+                    del gt_mask, pred_mask
+                    torch.cuda.empty_cache()
+
                 except Exception as e:
                     logger.error(f"Could not calculate metrics for {filename}!")
                     raise e
 
         # Calculate overall metrics
-        if with_metrics and all_gt_masks:
+        # Calculate overall metrics incrementally (RAM-safe)
+        if with_metrics and all_metrics['per_image_metrics']:
             print("\n📊 Calculating overall metrics...")
-            
             try:
+                total_pa, total_mpa, total_fw_iou, total_iou, total_dice = 0, 0, 0, 0, 0
+                count = len(all_metrics['per_image_metrics'])
+
+                for m in all_metrics['per_image_metrics']:
+                    total_pa += m['pixel_accuracy']
+                    total_mpa += m['mean_pixel_accuracy']
+                    total_fw_iou += m['frequency_weighted_iou']
+                    total_iou += m['mean_iou']
+                    total_dice += m['mean_dice']
+
                 all_gt_masks = np.concatenate(all_gt_masks)
                 all_pred_masks = np.concatenate(all_pred_masks)
-                
+                overall_metrics = {
+                    'pixel_accuracy': total_pa / count,
+                    'mean_pixel_accuracy': total_mpa / count,
+                    'frequency_weighted_iou': total_fw_iou / count,
+                    'mean_iou': total_iou / count,
+                    'mean_dice': total_dice / count
+                }
                 overall_metrics = {
                     'pixel_accuracy': calculate_pixel_accuracy(all_gt_masks, all_pred_masks),
                     'mean_pixel_accuracy': calculate_mean_pixel_accuracy(all_gt_masks, all_pred_masks, num_classes),
@@ -380,7 +440,7 @@ def test_model(model_name, with_metrics=True):
                     pred_mask = (all_pred_masks == i)
                     tp = np.logical_and(true_mask, pred_mask).sum()
                     fp = np.logical_and(~true_mask, pred_mask).sum()
-                    precision = tp / (tp + fp) if (tp + fp) > 0 else 0.0
+                    precision = float(tp) / float(tp + fp) if (tp + fp) > 0 else 0.0
                     map_scores.append(precision)
                 
                 overall_metrics['map_50'] = np.mean(map_scores)

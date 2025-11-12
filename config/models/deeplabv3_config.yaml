@@ -32,6 +32,6 @@ vars:
   use_amp: True # Add this line for mixed precision
   device: "cuda"
   all_classes: ["background", "building", "woodland", "water", "road"]
-  train_classes: ["background", "building", "woodland", "water"]
-  test_classes: ["background", "building", "water"]
+  train_classes: ["background", "building", "woodland", "water", "road"]
+  test_classes: ["background", "building", "woodland", "water", "road"]
   is_transformer: false

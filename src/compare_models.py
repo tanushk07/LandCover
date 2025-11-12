@@ -160,19 +160,33 @@ def compare_models(models_to_compare, test_only=False, save_results=True):
     
     # Analysis Phase
     # Analysis Phase
+# Analysis Phase
     print("\n📊 Phase 3: Analysis & Comparison")
     print("-" * 40)
 
     successful_models = [m for m in models_to_compare if 'error' not in results['test_results'].get(m, {})]
 
+    print(f"✅ Successfully tested models: {successful_models}")
+    print(f"📊 Total models for comparison: {len(successful_models)}")
+
     if successful_models:
         comparison_data = []
+        
         for model_name in successful_models:
+            print(f"📝 Processing {model_name.upper()} for comparison...")
+            
             test_res = results['test_results'][model_name]
             train_res = results['training_results'].get(model_name, {})
+            
+            # Validate that test_res has actual metrics
+            miou = test_res.get('mean_iou')
+            if miou is None or (isinstance(miou, float) and (np.isnan(miou))):
+                print(f"⚠️  Skipping {model_name} - no metrics found")
+                continue
 
-            comparison_data.append({
-                'Model': model_name.upper(),
+            
+            # Collect metrics
+            metrics = {
                 'Mean IoU': test_res.get('mean_iou', 0),
                 'Pixel Accuracy': test_res.get('pixel_accuracy', 0),
                 'Mean Pixel Accuracy': test_res.get('mean_pixel_accuracy', 0),
@@ -180,34 +194,56 @@ def compare_models(models_to_compare, test_only=False, save_results=True):
                 'Mean Dice': test_res.get('mean_dice', 0),
                 'mAP@50': test_res.get('map_50', 0),
                 'mAP@75': test_res.get('map_75', 0),
+            }
+            
+            # Print warning for invalid values (INSIDE the loop)
+            for metric_name, value in metrics.items():
+                if value < -1 or value > 1:  
+                    print(f"⚠️  WARNING: {model_name} has invalid {metric_name}: {value}")
+            
+            # Append to comparison data (INSIDE the loop)
+            comparison_data.append({
+                'Model': model_name.upper(),
+                **metrics,
                 'Training IoU': train_res.get('best_iou_score'),
                 'Training Time (min)': (train_res.get('training_time_seconds') or 0) / 60,
                 'Test Time (sec)': test_res.get('test_time_seconds', 0)
             })
+            
+            print(f"✅ {model_name.upper()} added to comparison (mIoU: {metrics['Mean IoU']:.4f})")
+        
+        if not comparison_data:
+            print("❌ No valid data collected for comparison!")
+            return results
 
         df = pd.DataFrame(comparison_data)
+        print(f"\n📊 DataFrame created with {len(df)} models")
 
         # Determine best model per metric
         best_per_metric = {}
-        for metric in METRIC_WEIGHTS.keys():
-            if metric in df.columns:
-                best_row = df.loc[df[metric].idxmax()]
-                best_per_metric[metric] = {
+        for metric_key in METRIC_WEIGHTS.keys():
+            col_name = METRIC_COLUMN_MAP.get(metric_key, metric_key)
+            if col_name in df.columns:
+                best_row = df.loc[df[col_name].idxmax()]
+                best_per_metric[metric_key] = {
                     'model': best_row['Model'],
-                    'score': best_row[metric]
+                    'score': best_row[col_name]
                 }
 
         # Compute weighted overall score
         def weighted_score(row):
             score = 0
             weight_sum = 0
-            for metric, weight in METRIC_WEIGHTS.items():
-                col = METRIC_COLUMN_MAP.get(metric, metric)
-                if col in row:
-                    score += row[col] * weight
-                    weight_sum += weight
+            for metric_key, weight in METRIC_WEIGHTS.items():
+                col_name = METRIC_COLUMN_MAP.get(metric_key, metric_key)
+                if col_name in row and pd.notna(row[col_name]):
+                    value = row[col_name]
+                    if -1 <= value <= 1:  # Basic sanity check
+                        score += value * weight
+                        weight_sum += weight
+                    else:
+                        print(f"⚠️  {col_name} has invalid value {value} for {row.get('Model', 'unknown')}")
             return score / weight_sum if weight_sum > 0 else 0
-
 
         df['Weighted Score'] = df.apply(weighted_score, axis=1)
         best_overall_row = df.loc[df['Weighted Score'].idxmax()]
@@ -230,20 +266,21 @@ def compare_models(models_to_compare, test_only=False, save_results=True):
             save_comparison_results(results, df)
             create_comparison_plots(df, results['experiment_info']['timestamp'])
 
-            # --- NEW: Bar chart for Weighted Score ---
-            import matplotlib.pyplot as plt
-            plt.figure(figsize=(8,5))
-            plt.bar(df['Model'], df['Weighted Score'], color="skyblue")
-            plt.title("Final Weighted Scores (Overall Model Performance)")
-            plt.ylabel("Weighted Score")
+            # Bar chart for Weighted Score
+            plt.figure(figsize=(10, 6))
+            plt.bar(df['Model'], df['Weighted Score'], color='skyblue', edgecolor='navy', alpha=0.7)
+            plt.title("Final Weighted Scores (Overall Model Performance)", fontsize=14, fontweight='bold')
+            plt.ylabel("Weighted Score", fontsize=12)
+            plt.xlabel("Model", fontsize=12)
             plt.xticks(rotation=30, ha="right")
+            plt.grid(axis='y', alpha=0.3)
             plt.tight_layout()
-            plt.savefig(f"output/model_comparison/weighted_scores_{results['experiment_info']['timestamp']}.png")
+            plt.savefig(f"output/model_comparison/weighted_scores_{results['experiment_info']['timestamp']}.png", dpi=300)
             plt.close()
+            print(f"📊 Weighted scores plot saved")
     else:
         print("❌ No models completed successfully for comparison.")
 
-    
     print(f"\n✅ Comparison completed! Results saved to output/model_comparison/")
     return results
 

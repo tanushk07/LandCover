@@ -130,16 +130,38 @@ if __name__ == "__main__":
             print(f"\nPredicting image file {filename}...")
             logger.info(f"Predicting image file {filename}...")
             try:
-                for i in tqdm(range(0, patches.shape[0])):
-                    for j in range(0, patches.shape[1]):
-                        img_patch = preprocessing_fn(patches[i, j, :, :, :])
-                        img_patch = img_patch.transpose(2, 0, 1).astype('float32')
+                # --- Create accumulation buffers ---
+                acc = np.zeros(image_padded.shape[:2], dtype=np.float32)
+                cnt = np.zeros(image_padded.shape[:2], dtype=np.float32)
+
+                # --- Predict overlapping patches ---
+                for i in tqdm(range(patches.shape[0]), desc="Predicting patches", leave=False):
+                    for j in range(patches.shape[1]):
+                        img_patch = preprocessing_fn(patches[i, j, :, :, :]).transpose(2, 0, 1).astype('float32')
                         x_tensor = torch.from_numpy(img_patch).to(device).unsqueeze(0)
-                        pred_mask = model.predict(x_tensor)
-                        pred_mask = pred_mask.squeeze().cpu().numpy().round()
-                        pred_mask = pred_mask.transpose(1, 2, 0)
-                        pred_mask = pred_mask.argmax(2)
-                        mask_patches[i, j, :, :] = pred_mask
+
+                        model.eval()
+                        with torch.no_grad():
+                            pred = model(x_tensor)
+                            if pred.shape[1] > 1:
+                                # Multi-class → take class index
+                                pred = torch.softmax(pred, dim=1).argmax(1)
+                            else:
+                                # Binary → threshold
+                                pred = (torch.sigmoid(pred) > 0.5).long().squeeze(1)
+
+                        pred_np = pred.squeeze(0).cpu().numpy().astype(np.float32)
+
+                        y0 = i * (patch_size // 2)
+                        x0 = j * (patch_size // 2)
+                        acc[y0:y0 + patch_size, x0:x0 + patch_size] += pred_np
+                        cnt[y0:y0 + patch_size, x0:x0 + patch_size] += 1.0
+
+                # --- Average overlapping regions ---
+                pred_mask = acc / np.maximum(cnt, 1e-6)
+                pred_mask = np.rint(pred_mask).astype(np.uint8)
+                pred_mask = pred_mask[:image.shape[0], :image.shape[1]]
+
             except Exception as e:
                 logger.error(f"Could not predict image file {filename}!")
                 raise e
@@ -181,13 +203,13 @@ if __name__ == "__main__":
                 raise e
             
             try:
-                cv2.imwrite(os.path.join(pred_mask_dir, filename), pred_mask)
+                cv2.imwrite(os.path.join(pred_mask_dir, filename), pred_mask.astype(np.uint8))
                 print("Predicted mask written successfully!")
                 logger.info("Predicted mask written successfully!")
             except Exception as e:
                 logger.error("Could not write the predicted mask!")
                 raise e
-
+            torch.cuda.empty_cache()
             try:
                 plot_fig = visualize(
                     image=image, 

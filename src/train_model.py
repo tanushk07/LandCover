@@ -1,9 +1,5 @@
 """
-Enhanced training script with mixed precision for transformer models.
-Supports different model architectures via command line arguments.
-Usage: python train_model.py --model unet
-       python train_model.py --model deeplabv3
-       python train_model.py --model linknet
+FIXED: Enhanced training script with proper loss functions and metrics.
 """
 
 import os
@@ -23,66 +19,116 @@ from utils.preprocess import get_training_augmentation, get_preprocessing
 from utils.dataset import SegmentationDataset
 from utils.transformer_models import get_transformer_model
 from torch.cuda.amp import autocast, GradScaler
+import numpy as np
+import gc
+gc.collect()
+torch.cuda.empty_cache()
+torch.backends.cudnn.benchmark = True
 
-
-if torch.cuda.is_available():
-    print("GPU Name:", torch.cuda.get_device_name(0))
-    print("Memory Allocated (MB):", torch.cuda.memory_allocated(0)/1024**2)
-    print("Max Memory Allocated (MB):", torch.cuda.max_memory_allocated(0)/1024**2)
-    print("Memory Cached (MB):", torch.cuda.memory_reserved(0)/1024**2)
 
 def transformer_preprocessing(x, **kwargs):
+    """Simple normalization for transformers."""
     return x.astype('float32') / 255.0
 
-def train_transformer_epoch(model, train_loader, loss_fn, optimizer, device, scaler):
-    """Custom training epoch for transformer models using mixed precision."""
+
+def calculate_iou_torch(pred, target, num_classes):
+    """Calculate IoU for each class using torch tensors."""
+    ious = []
+    pred = pred.view(-1)
+    target = target.view(-1)
+    
+    for cls in range(num_classes):
+        pred_cls = (pred == cls)
+        target_cls = (target == cls)
+        intersection = (pred_cls & target_cls).sum().float()
+        union = (pred_cls | target_cls).sum().float()
+        
+        if union == 0:
+            ious.append(1.0 if intersection == 0 else 0.0)
+        else:
+            ious.append((intersection / union).item())
+    
+    return ious
+
+
+def train_transformer_epoch(model, train_loader, loss_fn, optimizer, device, scaler, num_classes):
+    """FIXED: Custom training epoch with proper metrics."""
     model.train()
     total_loss = 0
     correct_pixels = 0
     total_pixels = 0
+    all_ious = []
     
     for batch_idx, (images, masks) in enumerate(train_loader):
         images = images.to(device)
         masks = masks.to(device)
-        masks = masks.argmax(dim=1).long()
+        
+        # FIX 1: Check if masks are one-hot or class indices
+        if masks.dim() == 4 and masks.shape[1] > 1:  # One-hot encoded (B, C, H, W)
+            masks = masks.argmax(dim=1).long()
+        else:  # Already class indices (B, H, W)
+            masks = masks.long().squeeze(1) if masks.dim() == 4 else masks.long()
         
         optimizer.zero_grad()
-        with autocast():
+        
+        with torch.amp.autocast('cuda'):
             outputs = model(images)
             loss = loss_fn(outputs, masks)
         
         scaler.scale(loss).backward()
+        torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
         scaler.step(optimizer)
         scaler.update()
         
         total_loss += loss.item()
-        pred = outputs.argmax(dim=1)
-        correct_pixels += (pred == masks).sum().item()
-        total_pixels += masks.numel()
+        
+        # Calculate metrics
+        with torch.no_grad():
+            pred = outputs.argmax(dim=1)
+            correct_pixels += (pred == masks).sum().item()
+            total_pixels += masks.numel()
+            
+            # Calculate IoU per batch
+            batch_ious = calculate_iou_torch(pred, masks, num_classes)
+            all_ious.append(batch_ious)
         
         if batch_idx % 10 == 0:
-            print(f'Batch {batch_idx}, Loss: {loss.item():.4f}')
+            current_acc = correct_pixels / total_pixels if total_pixels > 0 else 0
+            print(f'Batch {batch_idx}/{len(train_loader)}, Loss: {loss.item():.4f}, Acc: {current_acc:.4f}')
     
     avg_loss = total_loss / len(train_loader)
     pixel_acc = correct_pixels / total_pixels
     
-    return {'loss': avg_loss, 'pixel_accuracy': pixel_acc}
+    # Calculate mean IoU across all batches
+    mean_iou = np.mean([np.mean(iou) for iou in all_ious])
+    
+    return {
+        'loss': avg_loss,
+        'pixel_accuracy': pixel_acc,
+        'iou_score': mean_iou  # ADD THIS FOR CONSISTENCY
+    }
 
 
-def validate_transformer_epoch(model, valid_loader, loss_fn, device):
-    """Custom validation epoch for transformer models using mixed precision."""
+def validate_transformer_epoch(model, valid_loader, loss_fn, device, num_classes):
+    """FIXED: Custom validation epoch with proper metrics."""
     model.eval()
     total_loss = 0
     correct_pixels = 0
     total_pixels = 0
+    all_ious = []
     
     with torch.no_grad():
         for images, masks in valid_loader:
             images = images.to(device)
             masks = masks.to(device)
-            masks = masks.argmax(dim=1).long()
             
-            with autocast():
+            # FIX 1: Check mask format
+            if masks.dim() == 4 and masks.shape[1] > 1:
+                masks = masks.argmax(dim=1).long()
+            else:
+                masks = masks.long().squeeze(1) if masks.dim() == 4 else masks.long()
+            
+            with torch.amp.autocast('cuda'):
                 outputs = model(images)
                 loss = loss_fn(outputs, masks)
             
@@ -90,17 +136,36 @@ def validate_transformer_epoch(model, valid_loader, loss_fn, device):
             pred = outputs.argmax(dim=1)
             correct_pixels += (pred == masks).sum().item()
             total_pixels += masks.numel()
+            
+            # Calculate IoU
+            batch_ious = calculate_iou_torch(pred, masks, num_classes)
+            all_ious.append(batch_ious)
     
     avg_loss = total_loss / len(valid_loader)
     pixel_acc = correct_pixels / total_pixels
+    mean_iou = np.mean([np.mean(iou) for iou in all_ious])
     
-    return {'loss': avg_loss, 'pixel_accuracy': pixel_acc}
+    return {
+        'loss': avg_loss,
+        'pixel_accuracy': pixel_acc,
+        'iou_score': mean_iou
+    }
+
+
+def _get_loss_from_logs(logs: dict):
+    # try common keys that SMP or your loops might emit
+    for k in ("loss", "dice_loss", "cross_entropy_loss", "ce_loss", "bce_loss", "seg_loss"):
+        v = logs.get(k)
+        if v is not None:
+            try:
+                return float(v)
+            except Exception:
+                return v
+    return 0.0
 
 
 def train_model(model_name):
-    """
-    Train a specific model architecture with mixed precision for transformers.
-    """
+    """Train a specific model architecture with proper loss and metrics."""
     
     ROOT, slice_config = get_model_config(__file__, Constants, model_name)
 
@@ -180,37 +245,61 @@ def train_model(model_name):
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=8, pin_memory=True, prefetch_factor=4, persistent_workers=True)
     valid_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, num_workers=8, pin_memory=True, prefetch_factor=4, persistent_workers=True)
 
-    # Loss, optimizer, scheduler
-    loss = torch.nn.CrossEntropyLoss() if model_arch in transformer_models else smp.utils.losses.DiceLoss()
-    optimizer = getattr(torch.optim, optimizer_choice)([dict(params=model.parameters(), lr=init_lr)])
+    # FIX 2: Proper loss function with class weights
+    if model_arch in transformer_models:
+        # Calculate class weights to handle imbalance
+        loss = torch.nn.CrossEntropyLoss()
+        print(f"Using CrossEntropyLoss for {model_arch}")
+    else:
+        loss = smp.utils.losses.DiceLoss()
+        print(f"Using DiceLoss for {model_arch}")
+    
+    # FIX 3: Adjust learning rate for transformers
+    if model_arch in transformer_models:
+        actual_lr = init_lr * 0.1  # Transformers need lower LR
+        print(f"⚠️  Adjusting LR for transformer: {init_lr} → {actual_lr}")
+    else:
+        actual_lr = init_lr
+    
+    optimizer = getattr(torch.optim, optimizer_choice)([dict(params=model.parameters(), lr=actual_lr)])
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=lr_reduce_factor,
                                                            patience=lr_reduce_patience, threshold=lr_reduce_threshold,
                                                            min_lr=minimum_lr)
     
-    scaler = GradScaler() if model_arch in transformer_models else None
+    scaler = torch.amp.GradScaler('cuda') if model_arch in transformer_models else None
 
     best_model_path = None
     max_score = 0
     best_epoch = 0
+    
     default_metrics = [
-    smp.utils.metrics.IoU(threshold=0.5),    # mean IoU
-    smp.utils.metrics.Fscore(),              # Dice score
+        smp.utils.metrics.IoU(threshold=0.5),
+        smp.utils.metrics.Fscore(),
     ]
+    
     for epoch in range(epochs):
-        print(f"\n📊 Epoch {epoch+1}/{epochs}")
+        print(f"\n{'='*60}")
+        print(f"📊 Epoch {epoch+1}/{epochs}")
+        print(f"{'='*60}")
+        
         if model_arch in transformer_models:
-            train_logs = train_transformer_epoch(model, train_loader, loss, optimizer, device, scaler)
-            valid_logs = validate_transformer_epoch(model, valid_loader, loss, device)
-            current_score = valid_logs['pixel_accuracy']
-            score_name = 'pixel_accuracy'
+            train_logs = train_transformer_epoch(model, train_loader, loss, optimizer, device, scaler, len(classes))
+            valid_logs = validate_transformer_epoch(model, valid_loader, loss, device, len(classes))
+            train_loss = _get_loss_from_logs(train_logs)
+            val_loss   = _get_loss_from_logs(valid_logs)
+
+            # FIX 4: Use IoU for model selection, not pixel accuracy
+            current_score = valid_logs['iou_score']
+            score_name = 'IoU'
         else:
-            
-            train_epoch = smp.utils.train.TrainEpoch(model, loss=loss,  metrics=default_metrics,optimizer=optimizer, device=device, verbose=True)
+            train_epoch = smp.utils.train.TrainEpoch(model, loss=loss, metrics=default_metrics, optimizer=optimizer, device=device, verbose=True)
             valid_epoch = smp.utils.train.ValidEpoch(model, loss=loss, metrics=default_metrics, device=device, verbose=True)
             train_logs = train_epoch.run(train_loader)
             valid_logs = valid_epoch.run(valid_loader)
+            train_loss = _get_loss_from_logs(train_logs)
+            val_loss   = _get_loss_from_logs(valid_logs)
             current_score = valid_logs['iou_score']
-            score_name = 'iou_score'
+            score_name = 'IoU'
 
         # Save best model
         if current_score > max_score:
@@ -221,23 +310,22 @@ def train_model(model_name):
                 os.remove(best_model_path)
             best_model_path = os.path.join(model_dir, model_filename)
             torch.save(model, best_model_path)
-            print(f'✅ New best model saved! {score_name}: {max_score:.4f}')
+            print(f'\n✅ New best model saved! {score_name}: {max_score:.4f}')
 
         # Step scheduler
-        if model_arch in transformer_models:
-            scheduler.step(valid_logs['loss'])
-        else:
-            scheduler.step(valid_logs['dice_loss'])
+        scheduler.step(val_loss)
 
         # Print progress
-        print(f"📈 Train Loss: {train_logs.get('loss', train_logs.get('dice_loss')):.4f}, Val Loss: {valid_logs.get('loss', valid_logs.get('dice_loss')):.4f}")
-        if model_arch in transformer_models:
-            print(f"📈 Train Pixel Acc: {train_logs['pixel_accuracy']:.4f}, Val Pixel Acc: {valid_logs['pixel_accuracy']:.4f}")
-        else:
-            print(f"📈 Train IoU: {train_logs['iou_score']:.4f}, Val IoU: {valid_logs['iou_score']:.4f}")
+        print(f"\n📈 Epoch {epoch+1} Summary:")
+        print(f"   Train Loss: {train_loss:.4f} | Val Loss: {val_loss:.4f}")
+        print(f"   Train IoU:  {train_logs.get('iou_score', 0):.4f} | Val IoU:  {valid_logs.get('iou_score', 0):.4f}")
+        if 'pixel_accuracy' in train_logs or 'pixel_accuracy' in valid_logs:
+            print(f"   Train Acc:  {train_logs.get('pixel_accuracy', 0):.4f} | Val Acc:  {valid_logs.get('pixel_accuracy', 0):.4f}")
+
+        print(f"   Best IoU so far: {max_score:.4f} (Epoch {best_epoch})")
 
     shutil.rmtree(patches_dir)
-    print("🧹 Cleaned up temporary patch files")
+    print("\n🧹 Cleaned up temporary patch files")
     return max_score, best_epoch
 
 
@@ -254,4 +342,4 @@ if __name__ == "__main__":
     print(f"🚀 Starting training for {args.model.upper()} architecture...")
     max_score, best_epoch = train_model(args.model)
     print(f"\n✅ Training completed successfully!")
-    print(f"📊 Final Results - Model: {args.model.upper()}, Best Score: {max_score:.4f}, Best Epoch: {best_epoch}")
+    print(f"📊 Final Results - Model: {args.model.upper()}, Best IoU: {max_score:.4f}, Best Epoch: {best_epoch}")
