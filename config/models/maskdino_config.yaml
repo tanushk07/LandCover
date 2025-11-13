@@ -17,9 +17,9 @@ vars:
   file_type: ".tif"
 
   patch_size: 256
-  discard_rate: 0.9 # keep more patches for variety
-  batch_size: 4 # correct for MaskDINO (heavy model)
-  num_workers: 4
+  discard_rate: 0.9                 # keep all 5 images
+  batch_size: 4                      # heavy model + tiny dataset
+  num_workers: 0
 
   model_arch: "MaskDINO"
   model_name: "trained_landcover_maskdino_refined.pth"
@@ -29,23 +29,22 @@ vars:
   is_transformer: true
 
   optimizer_choice: "AdamW"
-  init_lr: 0.00003 # float ✅
-  weight_decay: 0.05 # float ✅
-  betas: [0.9, 0.999] # list ✅
-  reduce_lr_by_factor: 0.5 # float ✅
-  patience_epochs_before_reducing_lr: 8
-  lr_reduce_threshold: 0.0001
+  init_lr: 0.00005                   # lower for stability
+  weight_decay: 0.01
+  betas: [0.9, 0.999]
+  reduce_lr_by_factor: 0.5
+  patience_epochs_before_reducing_lr: 3
+  lr_reduce_threshold: 0.001
   minimum_lr: 0.000001
-  warmup_epochs: 3
-  epochs: 3
+  warmup_epochs: 1
+  epochs: 30                         # enough to overfit 5 images
   gradient_clip_value: 1.0
-
-  use_amp: True
-  grad_accum_steps: 2
-  dropout: 0.1
-  label_smoothing: 0.05
+  num_classes: 5
+  use_amp: True                     # disable AMP for simplicity
+  grad_accum_steps: 1
+  dropout: 0.0
+  label_smoothing: 0.0
   device: "cuda"
-
-  all_classes: ["background", "building", "woodland", "water", "road"]
-  train_classes: ["background", "building", "woodland", "water", "road"]
-  test_classes: ["background", "building", "woodland", "water", "road"]
+  all_classes: ['background', 'building', 'woodland', 'water', 'road']  # all the classes present in the dataset
+  train_classes: ['background', 'building', 'woodland', 'water', 'road']  # not training on 'road' class (need more fine-tuning)
+  test_classes: ['background', 'building', 'woodland', 'water', 'road']

@@ -17,9 +17,10 @@ vars:
   file_type: ".tif"
 
   patch_size: 256
-  discard_rate: 0.9
-  batch_size: 8
-  num_workers: 4
+  discard_rate: 0.9                  # keep all 5 patches
+  batch_size: 6
+  num_workers: 0
+  num_classes: 5
 
   model_arch: "SCTNet"
   model_name: trained_landcover_sctnet_selfcorrecting_refined.pth
@@ -28,23 +29,23 @@ vars:
   activation: "softmax2d"
 
   optimizer_choice: "AdamW"
-  init_lr: 0.0001
+  init_lr: 0.00005
   weight_decay: 0.01
-  warmup_epochs: 3
+  warmup_epochs: 1
   reduce_lr_by_factor: 0.5
-  patience_epochs_before_reducing_lr: 8
-  lr_reduce_threshold: 0.0001
+  patience_epochs_before_reducing_lr: 3
+  lr_reduce_threshold: 0.001
   minimum_lr: 0.000001
   gradient_clip_value: 1.0
 
   use_amp: True
-  grad_accum_steps: 2
-  dropout: 0.1
-  label_smoothing: 0.05
-  epochs: 3
+  grad_accum_steps: 1
+  dropout: 0.0
+  label_smoothing: 0.0
+  epochs: 25
   device: "cuda"
   is_transformer: true
 
-  all_classes: ["background", "building", "woodland", "water", "road"]
-  train_classes: ["background", "building", "woodland", "water", "road"]
-  test_classes: ["background", "building", "woodland", "water", "road"]
+  all_classes: ['background', 'building', 'woodland', 'water', 'road']  # all the classes present in the dataset
+  train_classes: ['background', 'building', 'woodland', 'water', 'road']  # not training on 'road' class (need more fine-tuning)
+  test_classes: ['background', 'building', 'woodland', 'water', 'road']

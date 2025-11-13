@@ -24,6 +24,63 @@ import gc
 gc.collect()
 torch.cuda.empty_cache()
 torch.backends.cudnn.benchmark = True
+from torch import nn
+import time
+import cv2
+
+
+def compute_class_weights(raw_mask_paths, class_raw_values, device, eps=1e-6):
+    counts = np.zeros(len(class_raw_values), dtype=np.float64)
+    for p in raw_mask_paths:
+        raw = cv2.imread(p, 0)
+        for i, v in enumerate(class_raw_values):
+            counts[i] += (raw == v).sum()
+    freqs = counts / (counts.sum() + eps)
+    weights = 1.0 / (np.log(1.02 + freqs))
+    weights = weights / weights.mean()
+    # build on CPU then move to device (safer)
+    w = torch.tensor(weights, dtype=torch.float32)  # CPU first
+    return w.to(device)
+
+
+class ComboLoss(nn.Module):
+    def __init__(self, weight=None, dice_weight=1.0, ce_weight=1.0, eps=1e-7):
+        super().__init__()
+        if weight is not None:
+            print("DEBUG weight type:", type(weight))
+            print("DEBUG weight tensor contents:", weight)
+            print("DEBUG weight dtype:", getattr(weight, 'dtype', None))
+            print("DEBUG weight device:", getattr(weight, 'device', None))
+        self.ce = torch.nn.CrossEntropyLoss(weight=weight)
+        self.dice = smp.utils.losses.DiceLoss()  # expects probabilities & one-hot
+        self.dice_weight = dice_weight
+        self.ce_weight = ce_weight
+        self.eps = eps
+
+    def forward(self, outputs, targets):
+        # outputs: logits (B, C, H, W)
+        # targets: (B, H, W) integer labels
+        ce_loss = self.ce(outputs, targets)
+
+        # one-hot and to same device/dtype
+        if targets.dim() == 3:
+            targets_one_hot = torch.nn.functional.one_hot(targets, num_classes=outputs.shape[1])\
+                                 .permute(0, 3, 1, 2).float().to(outputs.device)
+        else:
+            targets_one_hot = targets.float().to(outputs.device)
+
+        # convert logits to probabilities for dice
+        probs = torch.softmax(outputs, dim=1)
+
+        # ensure shapes match
+        if probs.shape != targets_one_hot.shape:
+            # fallback: broadcast or resize if needed (log message)
+            raise RuntimeError(f"Shape mismatch probs {probs.shape} vs targets {targets_one_hot.shape}")
+
+        dice_loss = self.dice(probs, targets_one_hot)
+
+        return self.ce_weight * ce_loss + self.dice_weight * dice_loss
+
 
 
 def transformer_preprocessing(x, **kwargs):
@@ -71,8 +128,22 @@ def train_transformer_epoch(model, train_loader, loss_fn, optimizer, device, sca
         
         optimizer.zero_grad()
         
-        with torch.amp.autocast('cuda'):
+        with torch.amp.autocast('cuda', enabled=(device.type == 'cuda')):
             outputs = model(images)
+            # --- Handle special output structures ---
+            if isinstance(outputs, dict):
+                if "pred_masks" in outputs:  # MaskDINO-style output
+                    outputs = outputs["pred_masks"]
+                    outputs = outputs.mean(dim=1, keepdim=False).unsqueeze(1)
+                    outputs = torch.cat([1 - outputs, outputs], dim=1)  # convert to 2-class logits
+                elif "out" in outputs:
+                    outputs = outputs["out"]
+                else:
+                    outputs = list(outputs.values())[0]
+            elif isinstance(outputs, (tuple, list)):
+                outputs = outputs[0]
+
+
             loss = loss_fn(outputs, masks)
         
         scaler.scale(loss).backward()
@@ -128,8 +199,20 @@ def validate_transformer_epoch(model, valid_loader, loss_fn, device, num_classes
             else:
                 masks = masks.long().squeeze(1) if masks.dim() == 4 else masks.long()
             
-            with torch.amp.autocast('cuda'):
+            with torch.amp.autocast('cuda', enabled=(device.type == 'cuda')):
                 outputs = model(images)
+                # --- Handle special output structures ---
+                if isinstance(outputs, dict):
+                    if "pred_masks" in outputs:  # MaskDINO-style output
+                        outputs = outputs["pred_masks"]
+                        outputs = outputs.mean(dim=1, keepdim=False).unsqueeze(1)
+                        outputs = torch.cat([1 - outputs, outputs], dim=1)  # convert to 2-class logits
+                    elif "out" in outputs:
+                        outputs = outputs["out"]
+                    else:
+                        outputs = list(outputs.values())[0]
+                elif isinstance(outputs, (tuple, list)):
+                    outputs = outputs[0]
                 loss = loss_fn(outputs, masks)
             
             total_loss += loss.item()
@@ -186,7 +269,8 @@ def train_model(model_name):
     epochs = slice_config['vars']['epochs']
     all_classes = slice_config['vars']['all_classes']
     classes = slice_config['vars']['train_classes']
-    device = torch.device(slice_config['vars']['device'] if torch.cuda.is_available() and slice_config['vars']['device'].startswith('cuda') else 'cpu')
+    raw_device = slice_config['vars']['device']
+    device = torch.device('cuda' if torch.cuda.is_available() and str(raw_device).startswith('cuda') else 'cpu')
 
     transformer_models = ['SegFormer', 'ViTSeg', 'HybridCNNTransformer', 'MaskDINO', 'SCTNet', 'EnhancedDeepLabV3Plus']
     
@@ -227,10 +311,43 @@ def train_model(model_name):
     # Build model
     if model_arch in transformer_models:
         model = get_transformer_model(model_arch=model_arch, num_classes=len(classes), encoder=encoder, encoder_weights=encoder_weights)
+        out_ch = len(classes)
+        head_fixed = False
+
+        if hasattr(model, 'decode_head'):
+            in_ch = getattr(model.decode_head, 'conv_seg', None)
+            if in_ch is not None:
+                in_ch = model.decode_head.conv_seg.in_channels
+                model.decode_head.conv_seg = torch.nn.Conv2d(in_ch, out_ch, kernel_size=1)
+                head_fixed = True
+
+        elif hasattr(model, 'segmentation_head'):
+            seg_head = model.segmentation_head
+            if isinstance(seg_head, torch.nn.Sequential):
+                in_ch = seg_head[0].in_channels
+                model.segmentation_head = torch.nn.Conv2d(in_ch, out_ch, kernel_size=1)
+            elif isinstance(seg_head, torch.nn.Conv2d):
+                in_ch = seg_head.in_channels
+                model.segmentation_head = torch.nn.Conv2d(in_ch, out_ch, kernel_size=1)
+            head_fixed = True
+
+        elif hasattr(model, 'classifier'):
+            in_ch = model.classifier.in_channels
+            model.classifier = torch.nn.Conv2d(in_ch, out_ch, kernel_size=1)
+            head_fixed = True
+
+        else:
+            print(f"⚠️ Could not auto-fix output head for {model_arch}, using existing head.")
+
+        if head_fixed:
+            print(f"✅ Output head adjusted to {out_ch} classes for {model_arch}")
+        else:
+            print(f"⚠️ Output head left unchanged for {model_arch}")
+
     else:
         smp_model = getattr(smp, model_arch)
         model = smp_model(encoder_name=encoder, encoder_weights=encoder_weights, classes=len(classes), activation=activation)
-    
+
     model.to(device)
     total_params = sum(p.numel() for p in model.parameters())
     print(f"Model Parameters - Total: {total_params:,}")
@@ -242,31 +359,39 @@ def train_model(model_name):
     val_dataset = SegmentationDataset(x_val_dir, y_val_dir, all_classes=all_classes, classes=classes,
                                       preprocessing=get_preprocessing(preprocessing_fn))
     
-    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=8, pin_memory=True, prefetch_factor=4, persistent_workers=True)
-    valid_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, num_workers=8, pin_memory=True, prefetch_factor=4, persistent_workers=True)
+    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=4, pin_memory=True, prefetch_factor=4, persistent_workers=True)
+    valid_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, num_workers=4, pin_memory=True, prefetch_factor=4, persistent_workers=True)
+
+    # ===== DEBUG SHAPE CHECK (only run once) =====
+    images, masks = next(iter(train_loader))
+    print("🔍 Dataset sanity check:")
+    print(f"Image batch shape: {images.shape}, dtype: {images.dtype}")
+    print(f"Mask batch shape: {masks.shape}, dtype: {masks.dtype}")
+    print(f"Mask unique values: {torch.unique(masks)}")
+    print("===========================================")
 
     # FIX 2: Proper loss function with class weights
+    mask_paths = [os.path.join(y_train_dir, f) for f in os.listdir(y_train_dir) if f.endswith(slice_config['vars']['file_type'])]
+    class_weights = compute_class_weights(mask_paths, list(range(len(classes))), device)
+    print("DEBUG class_weights:", class_weights, type(class_weights), class_weights.device, class_weights.dtype)
     if model_arch in transformer_models:
         # Calculate class weights to handle imbalance
-        loss = torch.nn.CrossEntropyLoss()
-        print(f"Using CrossEntropyLoss for {model_arch}")
+        loss = ComboLoss(weight=class_weights, dice_weight=1, ce_weight=0.5)
+
+        print(f"Using Weighted ComboLoss (CrossEntropy + Dice) for {model_arch}")
+
     else:
         loss = smp.utils.losses.DiceLoss()
         print(f"Using DiceLoss for {model_arch}")
     
-    # FIX 3: Adjust learning rate for transformers
-    if model_arch in transformer_models:
-        actual_lr = init_lr * 0.1  # Transformers need lower LR
-        print(f"⚠️  Adjusting LR for transformer: {init_lr} → {actual_lr}")
-    else:
-        actual_lr = init_lr
     
-    optimizer = getattr(torch.optim, optimizer_choice)([dict(params=model.parameters(), lr=actual_lr)])
+    
+    optimizer = getattr(torch.optim, optimizer_choice)([dict(params=model.parameters(), lr=init_lr)])
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=lr_reduce_factor,
                                                            patience=lr_reduce_patience, threshold=lr_reduce_threshold,
                                                            min_lr=minimum_lr)
     
-    scaler = torch.amp.GradScaler('cuda') if model_arch in transformer_models else None
+    scaler = torch.amp.GradScaler(device='cuda') if (device.type == 'cuda' and model_arch in transformer_models) else None
 
     best_model_path = None
     max_score = 0
@@ -276,8 +401,10 @@ def train_model(model_name):
         smp.utils.metrics.IoU(threshold=0.5),
         smp.utils.metrics.Fscore(),
     ]
-    
+    start_time_total = time.time()
+    epoch_times = []
     for epoch in range(epochs):
+        epoch_start = time.time()
         print(f"\n{'='*60}")
         print(f"📊 Epoch {epoch+1}/{epochs}")
         print(f"{'='*60}")
@@ -287,6 +414,8 @@ def train_model(model_name):
             valid_logs = validate_transformer_epoch(model, valid_loader, loss, device, len(classes))
             train_loss = _get_loss_from_logs(train_logs)
             val_loss   = _get_loss_from_logs(valid_logs)
+            torch.cuda.empty_cache()
+            gc.collect()
 
             # FIX 4: Use IoU for model selection, not pixel accuracy
             current_score = valid_logs['iou_score']
@@ -298,6 +427,8 @@ def train_model(model_name):
             valid_logs = valid_epoch.run(valid_loader)
             train_loss = _get_loss_from_logs(train_logs)
             val_loss   = _get_loss_from_logs(valid_logs)
+            torch.cuda.empty_cache()
+            gc.collect()    
             current_score = valid_logs['iou_score']
             score_name = 'IoU'
 
@@ -314,7 +445,17 @@ def train_model(model_name):
 
         # Step scheduler
         scheduler.step(val_loss)
-
+        epoch_time = time.time() - epoch_start
+        epoch_times.append(epoch_time)
+        avg_epoch_time = np.mean(epoch_times)
+        remaining_epochs = epochs - (epoch + 1)
+        eta_seconds = remaining_epochs * avg_epoch_time
+        eta_h = int(eta_seconds // 3600)
+        eta_m = int((eta_seconds % 3600) // 60)
+        eta_s = int(eta_seconds % 60)
+        epoch_h = int(epoch_time // 3600)
+        epoch_m = int((epoch_time % 3600) // 60)
+        epoch_s = int(epoch_time % 60)
         # Print progress
         print(f"\n📈 Epoch {epoch+1} Summary:")
         print(f"   Train Loss: {train_loss:.4f} | Val Loss: {val_loss:.4f}")
@@ -323,7 +464,13 @@ def train_model(model_name):
             print(f"   Train Acc:  {train_logs.get('pixel_accuracy', 0):.4f} | Val Acc:  {valid_logs.get('pixel_accuracy', 0):.4f}")
 
         print(f"   Best IoU so far: {max_score:.4f} (Epoch {best_epoch})")
+        print(f"🕒 Epoch Time: {epoch_m}m {epoch_s}s | ETA: {eta_h}h {eta_m}m {eta_s}s (Remaining: {remaining_epochs} epochs)")
 
+    total_time = time.time() - start_time_total
+    total_h = int(total_time // 3600)
+    total_m = int((total_time % 3600) // 60)
+    total_s = int(total_time % 60)
+    print(f"\n🏁 Training completed in {total_h}h {total_m}m {total_s}s")
     shutil.rmtree(patches_dir)
     print("\n🧹 Cleaned up temporary patch files")
     return max_score, best_epoch

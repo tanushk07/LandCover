@@ -18,16 +18,27 @@ def patching(data_dir, patches_dir, file_type, patch_size):
         # print("Patches shape:", patches.shape)
         for i in range(patches.shape[0]):
             for j in range(patches.shape[1]):
-                single_patch = patches[i, j, 0, :, :] # the 0 is an extra unncessary dimension added by patchify for multiple channels scenario
+                single_patch = patches[i, j, 0, :, :,:] # the 0 is an extra unncessary dimension added by patchify for multiple channels scenario
                 cv2.imwrite(os.path.join(patches_dir, filename.replace(file_type, f"_patch_{i}_{j}" + file_type)), single_patch)
 
 def discard_useless_patches(patches_img_dir, patches_mask_dir, discard_rate):
     for filename in tqdm(os.listdir(patches_mask_dir)):
         img_path = os.path.join(patches_img_dir, filename)
         mask_path = os.path.join(patches_mask_dir, filename)
-        mask = cv2.imread(mask_path)
-        classes, count = np.unique(mask, return_counts = True)
-        # If background class occupies more than the discard rate of the image, discard the image and mask
-        if (count[0] / count.sum()) > discard_rate:
+        if not os.path.exists(img_path):
+            continue
+        # read mask as grayscale (preserve class indices)
+        mask = cv2.imread(mask_path, cv2.IMREAD_UNCHANGED)
+        if mask is None:
+            continue
+        if mask.ndim == 3:
+            # if the mask is RGB palette, convert to single-channel by checking R (or convert fully later)
+            mask_gray = cv2.cvtColor(mask, cv2.COLOR_BGR2GRAY)
+        else:
+            mask_gray = mask
+        vals, counts = np.unique(mask_gray, return_counts=True)
+        # assume largest value is background? safer if you know background index.
+        bg_count = counts[vals.tolist().index(vals.min())] if len(vals) else 0
+        if (bg_count / counts.sum()) > discard_rate:
             os.remove(img_path)
             os.remove(mask_path)

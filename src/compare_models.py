@@ -141,6 +141,9 @@ def compare_models(models_to_compare, test_only=False, save_results=True):
             start_time = time.time()
             
             test_metrics = test_model(model_name)
+            for k, v in list(test_metrics.items()):
+                if v is None or (isinstance(v, float) and (np.isnan(v) or np.isinf(v))):
+                    test_metrics[k] = 0.0
             test_time = time.time() - start_time
             
             results['test_results'][model_name] = {

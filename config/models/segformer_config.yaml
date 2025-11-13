@@ -17,35 +17,35 @@ vars:
   file_type: ".tif"
 
   patch_size: 256
-  discard_rate: 0.9
-  batch_size: 8                     # good for RTX 5080
-  num_workers: 4
+  discard_rate: 0.9 # no patch discard
+  batch_size: 6
+  num_workers: 0
 
   model_arch: "SegFormer"
-  model_name: trained_landcover_segformer_segformer-b0_epochs60_patch512_batch14.pth
+  model_name: trained_landcover_segformer_segformer-b0_smallset.pth
   encoder: "segformer-b0"
   encoder_weights: "imagenet"
   activation: "softmax2d"
   is_transformer: true
 
   optimizer_choice: "AdamW"
-  init_lr: 0.00003                   # perfect base LR for MiT-B0
-  weight_decay: 0.05
+  init_lr: 0.00005
+  weight_decay: 0.01
   betas: [0.9, 0.999]
   reduce_lr_by_factor: 0.5
-  patience_epochs_before_reducing_lr: 8
-  lr_reduce_threshold: 0.0001
+  patience_epochs_before_reducing_lr: 3
+  lr_reduce_threshold: 0.001
   minimum_lr: 0.000001
-  warmup_epochs: 2                   # smoother start for transformers
-  epochs: 3                         # 20 is too short; 60 trains to full potential
+  warmup_epochs: 1
+  epochs: 25
   gradient_clip_value: 1.0
 
-  use_amp: True                      # mixed precision = faster and lighter
+  use_amp: True
   grad_accum_steps: 1
-  dropout: 0.1                       # minor regularization
-  label_smoothing: 0.05              # improves class balance
+  dropout: 0.0
+  label_smoothing: 0.0
   device: "cuda"
-
-  all_classes: ["background", "building", "woodland", "water", "road"]
-  train_classes: ["background", "building", "woodland", "water", "road"]
-  test_classes: ["background", "building", "woodland", "water", "road"]
+  num_classes: 5
+  all_classes: ["background", "building", "woodland", "water", "road"] # all the classes present in the dataset
+  train_classes: ['background', 'building', 'woodland', 'water', 'road']  # not training on 'road' class (need more fine-tuning)
+  test_classes: ['background', 'building', 'woodland', 'water', 'road']

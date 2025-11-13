@@ -19,7 +19,7 @@ import pandas as pd
 import matplotlib
 matplotlib.use('Agg')  # Use non-interactive backend
 import matplotlib.pyplot as plt
-
+from utils.preprocess import get_preprocessing
 from utils.constants import Constants
 from utils.plot import visualize
 from utils.logger import custom_logger
@@ -151,8 +151,6 @@ def test_model(model_name, with_metrics=True):
     model_path = model_dir / model_name_file
     model_path = model_path.as_posix()
     
-    # Check if it's a transformer model
-    transformer_models = ['SegFormer', 'ViTSeg', 'HybridCNNTransformer']
         # Check if it's a transformer model (now fully configurable via YAML)
     is_transformer = slice_config['vars'].get('is_transformer', False)
     if is_transformer:
@@ -161,6 +159,7 @@ def test_model(model_name, with_metrics=True):
     else:
         preprocessing_fn = smp.encoders.get_preprocessing_fn(encoder, encoder_weights)
 
+    preprocess_input = get_preprocessing(preprocessing_fn)
     model = torch.load(model_path, map_location=torch.device(device), weights_only=False)
     # output directories
     output_base_dir = ROOT / slice_config['dirs']['output_dir']
@@ -209,6 +208,10 @@ def test_model(model_name, with_metrics=True):
     all_pred_masks = []
 
     try:
+        model.to(device)
+        model.eval()
+        torch.set_grad_enabled(False)
+
         for idx, filename in enumerate(img_list, 1):
             print(f"\n[{idx}/{len(img_list)}] Processing {filename}...")
             logger.info(f"Processing image {filename}")
@@ -273,12 +276,19 @@ def test_model(model_name, with_metrics=True):
 
                 for i in tqdm(range(patches.shape[0]), desc="Predicting patches", leave=False):
                     for j in range(patches.shape[1]):
-                        patch = preprocessing_fn(patches[i, j, :, :, :]).transpose(2, 0, 1).astype("float32")
+                        processed = preprocess_input(image=patches[i, j, :, :, :])
+                        patch = processed["image"]
                         x_tensor = torch.from_numpy(patch).unsqueeze(0).to(device)
 
-                        with torch.amp.autocast("cuda",enabled= True):
+                        with torch.amp.autocast("cuda", enabled=(device.startswith("cuda"))):
                             pred = model(x_tensor)
-                            if num_classes > 1:
+                            if isinstance(pred, (tuple, list)):   # handle transformers that return tuples
+                                pred = pred[0]
+                            if isinstance(pred, dict) and "out" in pred:
+                                pred = pred["out"]
+
+                            # ✅ Consistent probability conversion
+                            if pred.shape[1] > 1:
                                 probs = torch.softmax(pred, dim=1)
                             else:
                                 probs = torch.sigmoid(pred)
@@ -293,7 +303,8 @@ def test_model(model_name, with_metrics=True):
 
                 # Normalize accumulated probabilities
                 weight_safe = np.maximum(weight, 1e-6)
-                pred_avg = acc / weight_safe[np.newaxis, :, :]
+                # Normalize accumulated probabilities (avoid divide-by-zero)
+                pred_avg = np.divide(acc, np.maximum(weight, 1e-6)[None, :, :], dtype=np.float32)
 
                 # Derive final mask
                 if num_classes > 1:
@@ -402,13 +413,13 @@ def test_model(model_name, with_metrics=True):
 
                 all_gt_masks = np.concatenate(all_gt_masks)
                 all_pred_masks = np.concatenate(all_pred_masks)
-                overall_metrics = {
-                    'pixel_accuracy': total_pa / count,
-                    'mean_pixel_accuracy': total_mpa / count,
-                    'frequency_weighted_iou': total_fw_iou / count,
-                    'mean_iou': total_iou / count,
-                    'mean_dice': total_dice / count
-                }
+                # overall_metrics = {
+                #     'pixel_accuracy': total_pa / count,
+                #     'mean_pixel_accuracy': total_mpa / count,
+                #     'frequency_weighted_iou': total_fw_iou / count,
+                #     'mean_iou': total_iou / count,
+                #     'mean_dice': total_dice / count
+                # }
                 overall_metrics = {
                     'pixel_accuracy': calculate_pixel_accuracy(all_gt_masks, all_pred_masks),
                     'mean_pixel_accuracy': calculate_mean_pixel_accuracy(all_gt_masks, all_pred_masks, num_classes),
