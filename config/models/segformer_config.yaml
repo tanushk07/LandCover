@@ -45,7 +45,7 @@ vars:
   dropout: 0.0
   label_smoothing: 0.0
   device: "cuda"
-  num_classes: 5
+  num_classes: 4
   all_classes: ["background", "building", "woodland", "water", "road"] # all the classes present in the dataset
-  train_classes: ['background', 'building', 'woodland', 'water', 'road']  # not training on 'road' class (need more fine-tuning)
-  test_classes: ['background', 'building', 'woodland', 'water', 'road']
+  train_classes: ["building", "woodland", "water", "road"] # not training on 'road' class (need more fine-tuning)
+  test_classes: ["building", "woodland", "water", "road"]

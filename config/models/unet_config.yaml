@@ -17,8 +17,8 @@ vars:
   file_type: ".tif"
 
   patch_size: 512
-  discard_rate: 0.9              # keep more patches for data diversity
-  batch_size: 16                 # fine for 512x512 on RTX 5080
+  discard_rate: 0.9 # keep more patches for data diversity
+  batch_size: 16 # fine for 512x512 on RTX 5080
   num_workers: 4
 
   model_arch: "Unet"
@@ -28,21 +28,21 @@ vars:
   activation: "softmax2d"
 
   optimizer_choice: "Adam"
-  init_lr: 0.0002                # slightly lower LR = smoother convergence
-  weight_decay: 0.0001           # adds light regularization
+  init_lr: 0.0002 # slightly lower LR = smoother convergence
+  weight_decay: 0.0001 # adds light regularization
   reduce_lr_by_factor: 0.5
   patience_epochs_before_reducing_lr: 8
   lr_reduce_threshold: 0.0001
   minimum_lr: 0.000001
   warmup_epochs: 2
-  epochs: 30                     # allows better feature learning
+  epochs: 30 # allows better feature learning
 
-  use_amp: true                  # mixed precision for faster training
+  use_amp: true # mixed precision for faster training
   gradient_clip_value: 1.0
   dropout: 0.1
   label_smoothing: 0.05
   device: "cuda"
 
   all_classes: ["background", "building", "woodland", "water", "road"]
-  train_classes: ["background", "building", "woodland", "water", "road"]
-  test_classes: ["background", "building", "woodland", "water", "road"]
+  train_classes: ["building", "woodland", "water", "road"]
+  test_classes: ["building", "woodland", "water", "road"]

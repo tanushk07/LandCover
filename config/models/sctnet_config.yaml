@@ -17,11 +17,9 @@ vars:
   file_type: ".tif"
 
   patch_size: 256
-  discard_rate: 0.9                  # keep all 5 patches
+  discard_rate: 0.9 # keep all 5 patches
   batch_size: 6
   num_workers: 0
-  num_classes: 5
-
   model_arch: "SCTNet"
   model_name: trained_landcover_sctnet_selfcorrecting_refined.pth
   encoder: "selfcorrecting"
@@ -46,6 +44,7 @@ vars:
   device: "cuda"
   is_transformer: true
 
-  all_classes: ['background', 'building', 'woodland', 'water', 'road']  # all the classes present in the dataset
-  train_classes: ['background', 'building', 'woodland', 'water', 'road']  # not training on 'road' class (need more fine-tuning)
-  test_classes: ['background', 'building', 'woodland', 'water', 'road']
+  num_classes: 4
+  all_classes: ["background", "building", "woodland", "water", "road"] # all the classes present in the dataset
+  train_classes: ["building", "woodland", "water", "road"] # not training on 'road' class (need more fine-tuning)
+  test_classes: ["building", "woodland", "water", "road"]

@@ -30,6 +30,7 @@ vars:
   minimum_lr: 0
   epochs: 1
   device: "cpu"
-  all_classes: ["background", "building", "woodland", "water", "road"]
-  train_classes: ["background", "building", "woodland", "water"]
-  test_classes: ["background", "building", "water"]
+  num_classes: 4
+  all_classes: ["background", "building", "woodland", "water", "road"] # all the classes present in the dataset
+  train_classes: ["building", "woodland", "water", "road"] # not training on 'road' class (need more fine-tuning)
+  test_classes: ["building", "woodland", "water", "road"]

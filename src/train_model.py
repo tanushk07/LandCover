@@ -33,6 +33,9 @@ def compute_class_weights(raw_mask_paths, class_raw_values, device, eps=1e-6):
     counts = np.zeros(len(class_raw_values), dtype=np.float64)
     for p in raw_mask_paths:
         raw = cv2.imread(p, 0)
+        
+        raw = raw[raw != 255]  # remove ignored pixels
+
         for i, v in enumerate(class_raw_values):
             counts[i] += (raw == v).sum()
     freqs = counts / (counts.sum() + eps)
@@ -42,64 +45,67 @@ def compute_class_weights(raw_mask_paths, class_raw_values, device, eps=1e-6):
     w = torch.tensor(weights, dtype=torch.float32)  # CPU first
     return w.to(device)
 
-
 class ComboLoss(nn.Module):
-    def __init__(self, weight=None, dice_weight=1.0, ce_weight=1.0, eps=1e-7):
+    """
+    CrossEntropyLoss (with ignore_index) + Dice Loss (masked to ignore background)
+    """
+    def __init__(self, weight=None, ignore_index=255, dice_weight=1.0, ce_weight=1.0):
         super().__init__()
-        if weight is not None:
-            print("DEBUG weight type:", type(weight))
-            print("DEBUG weight tensor contents:", weight)
-            print("DEBUG weight dtype:", getattr(weight, 'dtype', None))
-            print("DEBUG weight device:", getattr(weight, 'device', None))
-        self.ce = torch.nn.CrossEntropyLoss(weight=weight)
-        self.dice = smp.utils.losses.DiceLoss()  # expects probabilities & one-hot
+        self.ignore_index = ignore_index
+        self.ce = torch.nn.CrossEntropyLoss(weight=weight, ignore_index=ignore_index)
         self.dice_weight = dice_weight
         self.ce_weight = ce_weight
-        self.eps = eps
 
     def forward(self, outputs, targets):
-        # outputs: logits (B, C, H, W)
-        # targets: (B, H, W) integer labels
+        # outputs: (B,C,H,W)
+        # targets: (B,H,W)
+        
+        # ---- Cross Entropy ----
         ce_loss = self.ce(outputs, targets)
 
-        # one-hot and to same device/dtype
-        if targets.dim() == 3:
-            targets_one_hot = torch.nn.functional.one_hot(targets, num_classes=outputs.shape[1])\
-                                 .permute(0, 3, 1, 2).float().to(outputs.device)
-        else:
-            targets_one_hot = targets.float().to(outputs.device)
+        # ---- Dice ----
+        # mask ignored pixels
+        valid_mask = (targets != self.ignore_index)
 
-        # convert logits to probabilities for dice
+        # One-hot only for valid pixels
+        num_classes = outputs.shape[1]
+        one_hot = torch.nn.functional.one_hot(
+            torch.clamp(targets, 0, num_classes - 1), num_classes=num_classes
+        )  # no 255 here
+        one_hot = one_hot.permute(0, 3, 1, 2).float()
+
         probs = torch.softmax(outputs, dim=1)
 
-        # ensure shapes match
-        if probs.shape != targets_one_hot.shape:
-            # fallback: broadcast or resize if needed (log message)
-            raise RuntimeError(f"Shape mismatch probs {probs.shape} vs targets {targets_one_hot.shape}")
+        # Apply pixel mask
+        probs = probs * valid_mask.unsqueeze(1)
+        one_hot = one_hot * valid_mask.unsqueeze(1)
 
-        dice_loss = self.dice(probs, targets_one_hot)
+        intersection = (probs * one_hot).sum(dim=(0, 2, 3))
+        union = probs.sum(dim=(0, 2, 3)) + one_hot.sum(dim=(0, 2, 3))
+
+        dice_loss = 1 - ((2 * intersection + 1e-6) / (union + 1e-6)).mean()
 
         return self.ce_weight * ce_loss + self.dice_weight * dice_loss
-
 
 
 def transformer_preprocessing(x, **kwargs):
     """Simple normalization for transformers."""
     return x.astype('float32') / 255.0
 
-
 def calculate_iou_torch(pred, target, num_classes):
-    """Calculate IoU for each class using torch tensors."""
     ious = []
-    pred = pred.view(-1)
-    target = target.view(-1)
-    
+
+    valid = target != 255   # ignore unlabeled pixels
+    pred = pred[valid]
+    target = target[valid]
+
     for cls in range(num_classes):
         pred_cls = (pred == cls)
         target_cls = (target == cls)
+
         intersection = (pred_cls & target_cls).sum().float()
         union = (pred_cls | target_cls).sum().float()
-        
+
         if union == 0:
             ious.append(1.0 if intersection == 0 else 0.0)
         else:
@@ -310,7 +316,12 @@ def train_model(model_name):
 
     # Build model
     if model_arch in transformer_models:
-        model = get_transformer_model(model_arch=model_arch, num_classes=len(classes), encoder=encoder, encoder_weights=encoder_weights)
+        model = get_transformer_model(
+            model_arch=model_arch,
+            num_classes=5,
+            encoder=encoder,
+            encoder_weights=encoder_weights
+        )
         out_ch = len(classes)
         head_fixed = False
 
@@ -372,11 +383,17 @@ def train_model(model_name):
 
     # FIX 2: Proper loss function with class weights
     mask_paths = [os.path.join(y_train_dir, f) for f in os.listdir(y_train_dir) if f.endswith(slice_config['vars']['file_type'])]
-    class_weights = compute_class_weights(mask_paths, list(range(len(classes))), device)
+    class_weights = compute_class_weights(mask_paths, list(range(5)), device)
     print("DEBUG class_weights:", class_weights, type(class_weights), class_weights.device, class_weights.dtype)
     if model_arch in transformer_models:
         # Calculate class weights to handle imbalance
-        loss = ComboLoss(weight=class_weights, dice_weight=1, ce_weight=0.5)
+        loss = ComboLoss(
+            weight=class_weights,
+            ignore_index=255,
+            dice_weight=1.0,
+            ce_weight=1.0
+        )
+
 
         print(f"Using Weighted ComboLoss (CrossEntropy + Dice) for {model_arch}")
 
@@ -410,8 +427,8 @@ def train_model(model_name):
         print(f"{'='*60}")
         
         if model_arch in transformer_models:
-            train_logs = train_transformer_epoch(model, train_loader, loss, optimizer, device, scaler, len(classes))
-            valid_logs = validate_transformer_epoch(model, valid_loader, loss, device, len(classes))
+            train_logs = train_transformer_epoch(model, train_loader, loss, optimizer, device, scaler, 5)
+            valid_logs = validate_transformer_epoch(model, valid_loader, loss, device, 5)
             train_loss = _get_loss_from_logs(train_logs)
             val_loss   = _get_loss_from_logs(valid_logs)
             torch.cuda.empty_cache()

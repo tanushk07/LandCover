@@ -6,78 +6,90 @@ from torch.utils.data import Dataset
 
 class SegmentationDataset(Dataset):
     """
-    LandCover.AI dataset.
-    Reads images and segmentation masks, applies augmentations and preprocessing.
+    LandCover.ai dataset loader (train only foreground classes)
+    Classes used:
+        raw: 
+            0 = background
+            1 = building
+            2 = woodland
+            3 = water
+            4 = road
 
-    Args:
-        images_dir (str): Path to images folder
-        masks_dir (str): Path to segmentation masks folder
-        all_classes (list): List of all available classes
-        classes (list): Subset of classes to train on
-        augmentation (albumentations.Compose, optional): Data augmentation pipeline
-        preprocessing (albumentations.Compose, optional): Data preprocessing pipeline
+        remapped:
+            building -> 0
+            woodland -> 1
+            water -> 2
+            road -> 3
+
+    Background is mapped to IGNORE_INDEX for loss.
     """
 
-    def __init__(self, images_dir, masks_dir, all_classes, classes=None, augmentation=None, preprocessing=None):
-        self.ids = os.listdir(images_dir)
-        self.images = [os.path.join(images_dir, image_id) for image_id in self.ids]
-        self.masks = [os.path.join(masks_dir, image_id) for image_id in self.ids]
+    IGNORE_INDEX = 255   # ignored during training
 
-        # Convert class names to index positions
-        self.class_values = [all_classes.index(cls.lower()) for cls in classes]
+    def __init__(self, images_dir, masks_dir, all_classes, classes=None, augmentation=None, preprocessing=None):
+        self.ids = sorted(os.listdir(images_dir))
+        self.images = [os.path.join(images_dir, f) for f in self.ids]
+        self.masks = [os.path.join(masks_dir, f) for f in self.ids]
+
+        # Mapping original dataset labels to training labels
+        # include background again
+        # raw → new index mapping
+        self.mapping = {0:0, 1:1, 2:2, 3:3, 4:4}
+        self.num_classes = 5
+
+
+        self.valid_raw_labels = set(self.mapping.keys())
+
         self.augmentation = augmentation
         self.preprocessing = preprocessing
 
-        # Masks are already encoded as 0–4 (background, building, woodland, water, road)
-        self.id_to_class = {0: 0, 1: 1, 2: 2, 3: 3, 4: 4}
-
-
     def __getitem__(self, i):
-        image = cv2.imread(self.images[i], cv2.IMREAD_COLOR)
-        if image is None:
-            raise FileNotFoundError(self.images[i])
-        image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB).astype('float32') / 255.0
+        # ---- Load Image ----
+        img = cv2.imread(self.images[i], cv2.IMREAD_COLOR)
+        if img is None:
+            raise FileNotFoundError(f"Image missing: {self.images[i]}")
+        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
 
-        raw_mask = cv2.imread(self.masks[i], cv2.IMREAD_UNCHANGED)
-        if raw_mask is None:
-            raise FileNotFoundError(self.masks[i])
+        # ---- Load Mask ----
+        mask = cv2.imread(self.masks[i], cv2.IMREAD_UNCHANGED)
+        if mask is None:
+            raise FileNotFoundError(f"Mask missing: {self.masks[i]}")
 
-        # Convert 0–14 raw mask → 0–4 semantic mask
-        if raw_mask.ndim == 2:
-            mask_index = np.vectorize(lambda v: self.id_to_class.get(int(v), 0))(raw_mask)
-        else:
-            rgb_flat = raw_mask.reshape(-1, 3)
-            unique_rgbs = np.unique(rgb_flat, axis=0)
-            palette_map = {tuple(rgb.tolist()): idx for idx, rgb in enumerate(unique_rgbs)}
-            mask_single = np.zeros(raw_mask.shape[:2], dtype=np.uint8)
-            flat_out = mask_single.reshape(-1)
-            for rgb, idxval in palette_map.items():
-                matches = np.all(rgb_flat == rgb, axis=1)
-                flat_out[matches] = idxval
-            mask_index = mask_single
+        if mask.ndim > 2:
+            mask = cv2.cvtColor(mask, cv2.COLOR_BGR2GRAY)
 
-        # ✅ Important: ensure dtype is discrete integer
-        mask_index = mask_index.astype(np.uint8)
+        # ---- Clean invalid values ----
+        # Any label not in {0–4} becomes background
+        mask = np.where(np.isin(mask, [0,1,2,3,4]), mask, 0)
 
-        # Apply augmentations and preprocessing
+        # ---- Remap raw classes to training indices ----
+        mapped_mask = np.full_like(mask, self.IGNORE_INDEX, dtype=np.uint8)
+        for raw, new in self.mapping.items():
+            mapped_mask[mask == raw] = new
+
+        # background stays IGNORE_INDEX (255)
+
+        # ---- Apply Augmentation ----
         if self.augmentation:
-            sample = self.augmentation(image=image, mask=mask_index)
-            image, mask_index = sample['image'], sample['mask']
+            augmented = self.augmentation(image=img, mask=mapped_mask)
+            img, mapped_mask = augmented["image"], augmented["mask"]
 
+        # ---- Apply Preprocessing ----
         if self.preprocessing:
-            sample = self.preprocessing(image=image, mask=mask_index)
-            image, mask_index = sample['image'], sample['mask']
+            processed = self.preprocessing(image=img, mask=mapped_mask)
+            img, mapped_mask = processed["image"], processed["mask"]
+        else:
+            img = img.astype("float32") / 255.0
 
-        # To tensor
-        image = torch.as_tensor(image, dtype=torch.float32)
-        if image.ndim == 3 and image.shape[2] in (1, 3):
-            image = image.permute(2, 0, 1).contiguous()
-        if image.ndim == 2:
-            image = image.unsqueeze(0)
+        # ---- Tensor conversion ----
+        if img.ndim == 3 and img.shape[-1] in (1, 3):
+            img = img.transpose(2, 0, 1)  # HWC -> CHW
 
-        mask_index = torch.as_tensor(mask_index, dtype=torch.long).squeeze()
+        # Final tensors
+        img_tensor = torch.tensor(img, dtype=torch.float32)
+        mask_tensor = torch.tensor(mapped_mask, dtype=torch.long)
 
-        return image, mask_index
+        return img_tensor, mask_tensor
 
     def __len__(self):
         return len(self.ids)

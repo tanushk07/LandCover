@@ -22,23 +22,23 @@ def patching(data_dir, patches_dir, file_type, patch_size):
                 cv2.imwrite(os.path.join(patches_dir, filename.replace(file_type, f"_patch_{i}_{j}" + file_type)), single_patch)
 
 def discard_useless_patches(patches_img_dir, patches_mask_dir, discard_rate):
-    for filename in tqdm(os.listdir(patches_mask_dir)):
+    BACKGROUND = 0
+    for filename in os.listdir(patches_mask_dir):
         img_path = os.path.join(patches_img_dir, filename)
         mask_path = os.path.join(patches_mask_dir, filename)
-        if not os.path.exists(img_path):
-            continue
-        # read mask as grayscale (preserve class indices)
+
+        if not os.path.exists(img_path): continue
+
         mask = cv2.imread(mask_path, cv2.IMREAD_UNCHANGED)
-        if mask is None:
-            continue
-        if mask.ndim == 3:
-            # if the mask is RGB palette, convert to single-channel by checking R (or convert fully later)
-            mask_gray = cv2.cvtColor(mask, cv2.COLOR_BGR2GRAY)
-        else:
-            mask_gray = mask
+        if mask is None: continue
+
+        mask_gray = mask if mask.ndim == 2 else cv2.cvtColor(mask, cv2.COLOR_BGR2GRAY)
+
         vals, counts = np.unique(mask_gray, return_counts=True)
-        # assume largest value is background? safer if you know background index.
-        bg_count = counts[vals.tolist().index(vals.min())] if len(vals) else 0
+        if counts.sum() == 0: continue
+
+        bg_count = counts[vals.tolist().index(BACKGROUND)] if BACKGROUND in vals else 0
+
         if (bg_count / counts.sum()) > discard_rate:
             os.remove(img_path)
             os.remove(mask_path)
