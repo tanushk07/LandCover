@@ -1,0 +1,185 @@
+{
+  "training_results": {
+    "maskdino": {
+      "best_iou_score": 0.7221595829045588,
+      "best_epoch": 30,
+      "training_time_seconds": 4119.366591930389,
+      "training_time_formatted": "1h 8m 39s",
+      "status": "trained"
+    },
+    "sctnet": {
+      "best_iou_score": 0.7015204464530794,
+      "best_epoch": 21,
+      "training_time_seconds": 3276.206061601639,
+      "training_time_formatted": "0h 54m 36s",
+      "status": "trained"
+    },
+    "segformer": {
+      "best_iou_score": 0.6662133269567155,
+      "best_epoch": 23,
+      "training_time_seconds": 5798.864025592804,
+      "training_time_formatted": "1h 36m 39s",
+      "status": "trained"
+    }
+  },
+  "test_results": {
+    "maskdino": {
+      "pixel_accuracy": 0.4423117295444995,
+      "mean_pixel_accuracy": 0.3719327809827806,
+      "frequency_weighted_iou": 0.4125674672759902,
+      "mean_iou": 0.15940877398323455,
+      "per_class_iou": {
+        "building": 0.7946345449693958,
+        "woodland": 0.00019999510564211218,
+        "water": 0.0015439011672698716,
+        "road": 0.0006654286738651502
+      },
+      "mean_dice": 0.2225949756572139,
+      "per_class_dice": {
+        "building": 0.8855669776299183,
+        "woodland": 0.0003999102311952891,
+        "water": 0.003083042421746067,
+        "road": 0.001329972345995827
+      },
+      "map_50": 0.18571497561610867,
+      "map_75": 0.14857198049288695,
+      "test_time_seconds": 146.6032633781433,
+      "test_time_formatted": "2m 27s"
+    },
+    "sctnet": {
+      "pixel_accuracy": 0.44070017347375307,
+      "mean_pixel_accuracy": 0.3702477590405128,
+      "frequency_weighted_iou": 0.40589126670486597,
+      "mean_iou": 0.15658508766010373,
+      "per_class_iou": {
+        "building": 0.7820664700949241,
+        "woodland": 0.00022451417780729828,
+        "water": 0.0005325364641250736,
+        "road": 0.00010191756366203142
+      },
+      "mean_dice": 0.2198561636868681,
+      "per_class_dice": {
+        "building": 0.8777074067874319,
+        "woodland": 0.00044892756501144297,
+        "water": 0.001064506039967583,
+        "road": 0.0002038143550615556
+      },
+      "map_50": 0.18243060164063002,
+      "map_75": 0.145944481312504,
+      "test_time_seconds": 153.38310551643372,
+      "test_time_formatted": "2m 33s"
+    },
+    "segformer": {
+      "pixel_accuracy": 0.43843574417165615,
+      "mean_pixel_accuracy": 0.3700871032015597,
+      "frequency_weighted_iou": 0.3975572812820502,
+      "mean_iou": 0.15356500943222348,
+      "per_class_iou": {
+        "building": 0.7657521518034952,
+        "woodland": 6.749256088053846e-05,
+        "water": 0.0017333002283884031,
+        "road": 0.00027210256835333383
+      },
+      "mean_dice": 0.2178694603288536,
+      "per_class_dice": {
+        "building": 0.8673382060119537,
+        "woodland": 0.0001349760118843774,
+        "water": 0.0034606021942032326,
+        "road": 0.0005440570973731416
+      },
+      "map_50": 0.17930373723740123,
+      "map_75": 0.14344298978992098,
+      "test_time_seconds": 181.74920320510864,
+      "test_time_formatted": "3m 2s"
+    }
+  },
+  "comparison_summary": {
+    "best_per_metric": {
+      "mean_iou": {
+        "model": "MASKDINO",
+        "score": 0.15940877398323455
+      },
+      "mean_dice": {
+        "model": "MASKDINO",
+        "score": 0.2225949756572139
+      },
+      "pixel_accuracy": {
+        "model": "MASKDINO",
+        "score": 0.4423117295444995
+      },
+      "mean_pixel_accuracy": {
+        "model": "MASKDINO",
+        "score": 0.3719327809827806
+      },
+      "frequency_weighted_iou": {
+        "model": "MASKDINO",
+        "score": 0.4125674672759902
+      },
+      "map_50": {
+        "model": "MASKDINO",
+        "score": 0.18571497561610867
+      },
+      "map_75": {
+        "model": "MASKDINO",
+        "score": 0.14857198049288695
+      }
+    },
+    "best_model_overall": {
+      "model": "MASKDINO",
+      "weighted_score": 0.27791360074114374
+    },
+    "full_ranking": [
+      {
+        "Model": "MASKDINO",
+        "Mean IoU": 0.15940877398323455,
+        "Pixel Accuracy": 0.4423117295444995,
+        "Mean Pixel Accuracy": 0.3719327809827806,
+        "Frequency Weighted IoU": 0.4125674672759902,
+        "Mean Dice": 0.2225949756572139,
+        "mAP@50": 0.18571497561610867,
+        "mAP@75": 0.14857198049288695,
+        "Training IoU": 0.7221595829045588,
+        "Training Time (min)": 68.6561098655065,
+        "Test Time (sec)": 146.6032633781433,
+        "Weighted Score": 0.27791360074114374
+      },
+      {
+        "Model": "SCTNET",
+        "Mean IoU": 0.15658508766010373,
+        "Pixel Accuracy": 0.44070017347375307,
+        "Mean Pixel Accuracy": 0.3702477590405128,
+        "Frequency Weighted IoU": 0.40589126670486597,
+        "Mean Dice": 0.2198561636868681,
+        "mAP@50": 0.18243060164063002,
+        "mAP@75": 0.145944481312504,
+        "Training IoU": 0.7015204464530794,
+        "Training Time (min)": 54.603434360027315,
+        "Test Time (sec)": 153.38310551643372,
+        "Weighted Score": 0.27511353937352506
+      },
+      {
+        "Model": "SEGFORMER",
+        "Mean IoU": 0.15356500943222348,
+        "Pixel Accuracy": 0.43843574417165615,
+        "Mean Pixel Accuracy": 0.3700871032015597,
+        "Frequency Weighted IoU": 0.3975572812820502,
+        "Mean Dice": 0.2178694603288536,
+        "mAP@50": 0.17930373723740123,
+        "mAP@75": 0.14344298978992098,
+        "Training IoU": 0.6662133269567155,
+        "Training Time (min)": 96.64773375988007,
+        "Test Time (sec)": 181.74920320510864,
+        "Weighted Score": 0.2724326622117348
+      }
+    ]
+  },
+  "experiment_info": {
+    "timestamp": "2025-11-17_04-04-54",
+    "models_compared": [
+      "maskdino",
+      "sctnet",
+      "segformer"
+    ],
+    "test_only": false
+  }
+}
