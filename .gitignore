@@ -5,6 +5,7 @@ output/
 logs/
 models/
 venv/
+tmp_env/
 __pycache__/
 *.pyc
 *.pyo

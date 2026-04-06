@@ -1,16 +1,22 @@
-# set base image (host OS)
-FROM python:3.9
+# Use an official PyTorch image with CUDA support
+FROM pytorch/pytorch:2.2.0-cuda12.1-cudnn8-runtime
 
-# set the working directory in the container
+# Set the working directory
 WORKDIR /segment_project
 
-# copy the dependencies file to the working directory
+# Install system dependencies for OpenCV and other packages
+RUN apt-get update && apt-get install -y \
+    libgl1-mesa-glx \
+    libglib2.0-0 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy the dependencies file
 COPY requirements.txt .
 
-# install dependencies
+# Install dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
-# copy the content from the local directory to the working directory
+# Copy the content from the local directory to the working directory
 COPY ./config ./config
 COPY ./data ./data
 COPY ./models ./models
