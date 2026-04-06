@@ -255,6 +255,8 @@ def _get_loss_from_logs(logs: dict):
 
 def train_model(model_name):
     """Train a specific model architecture with proper loss and metrics."""
+    from utils.hardware_check import print_hardware_status
+    print_hardware_status(f"Training Model: {model_name.upper()}")
     
     ROOT, slice_config = get_model_config(__file__, Constants, model_name)
 
@@ -357,7 +359,7 @@ def train_model(model_name):
 
     else:
         smp_model = getattr(smp, model_arch)
-        model = smp_model(encoder_name=encoder, encoder_weights=encoder_weights, classes=len(classes), activation=activation)
+        model = smp_model(encoder_name=encoder, encoder_weights=encoder_weights, classes=len(all_classes), activation=activation)
 
     model.to(device)
     total_params = sum(p.numel() for p in model.parameters())
@@ -385,30 +387,21 @@ def train_model(model_name):
     mask_paths = [os.path.join(y_train_dir, f) for f in os.listdir(y_train_dir) if f.endswith(slice_config['vars']['file_type'])]
     class_weights = compute_class_weights(mask_paths, list(range(5)), device)
     print("DEBUG class_weights:", class_weights, type(class_weights), class_weights.device, class_weights.dtype)
-    if model_arch in transformer_models:
-        # Calculate class weights to handle imbalance
-        loss = ComboLoss(
-            weight=class_weights,
-            ignore_index=255,
-            dice_weight=1.0,
-            ce_weight=1.0
-        )
-
-
-        print(f"Using Weighted ComboLoss (CrossEntropy + Dice) for {model_arch}")
-
-    else:
-        loss = smp.utils.losses.DiceLoss()
-        print(f"Using DiceLoss for {model_arch}")
     
-    
+    loss = ComboLoss(
+        weight=class_weights,
+        ignore_index=255,
+        dice_weight=1.0,
+        ce_weight=1.0
+    )
+    print(f"Using Weighted ComboLoss (CrossEntropy + Dice) for {model_arch}")
     
     optimizer = getattr(torch.optim, optimizer_choice)([dict(params=model.parameters(), lr=init_lr)])
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=lr_reduce_factor,
                                                            patience=lr_reduce_patience, threshold=lr_reduce_threshold,
                                                            min_lr=minimum_lr)
     
-    scaler = torch.amp.GradScaler(device='cuda') if (device.type == 'cuda' and model_arch in transformer_models) else None
+    scaler = torch.amp.GradScaler(device='cuda') if device.type == 'cuda' else None
 
     best_model_path = None
     max_score = 0
@@ -426,28 +419,16 @@ def train_model(model_name):
         print(f"📊 Epoch {epoch+1}/{epochs}")
         print(f"{'='*60}")
         
-        if model_arch in transformer_models:
-            train_logs = train_transformer_epoch(model, train_loader, loss, optimizer, device, scaler, 5)
-            valid_logs = validate_transformer_epoch(model, valid_loader, loss, device, 5)
-            train_loss = _get_loss_from_logs(train_logs)
-            val_loss   = _get_loss_from_logs(valid_logs)
-            torch.cuda.empty_cache()
-            gc.collect()
+        train_logs = train_transformer_epoch(model, train_loader, loss, optimizer, device, scaler, 5)
+        valid_logs = validate_transformer_epoch(model, valid_loader, loss, device, 5)
+        train_loss = _get_loss_from_logs(train_logs)
+        val_loss   = _get_loss_from_logs(valid_logs)
+        torch.cuda.empty_cache()
+        gc.collect()
 
-            # FIX 4: Use IoU for model selection, not pixel accuracy
-            current_score = valid_logs['iou_score']
-            score_name = 'IoU'
-        else:
-            train_epoch = smp.utils.train.TrainEpoch(model, loss=loss, metrics=default_metrics, optimizer=optimizer, device=device, verbose=True)
-            valid_epoch = smp.utils.train.ValidEpoch(model, loss=loss, metrics=default_metrics, device=device, verbose=True)
-            train_logs = train_epoch.run(train_loader)
-            valid_logs = valid_epoch.run(valid_loader)
-            train_loss = _get_loss_from_logs(train_logs)
-            val_loss   = _get_loss_from_logs(valid_logs)
-            torch.cuda.empty_cache()
-            gc.collect()    
-            current_score = valid_logs['iou_score']
-            score_name = 'IoU'
+        # FIX 4: Use IoU for model selection, not pixel accuracy
+        current_score = valid_logs['iou_score']
+        score_name = 'IoU'
 
         # Save best model
         if current_score > max_score:

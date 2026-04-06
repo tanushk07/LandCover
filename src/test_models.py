@@ -80,6 +80,18 @@ def calculate_dice_coefficient(y_true, y_pred, class_id):
     return dice
 
 
+def calculate_precision_proxy(y_true, y_pred, class_id):
+    """Calculate Precision as a proxy for Average Precision in semantic segmentation."""
+    true_mask = (y_true == class_id)
+    pred_mask = (y_pred == class_id)
+    
+    tp = np.logical_and(true_mask, pred_mask).sum()
+    fp = np.logical_and(~true_mask, pred_mask).sum()
+    
+    precision = float(tp) / float(tp + fp) if (tp + fp) > 0 else 0.0
+    return precision
+
+
 def calculate_frequency_weighted_iou(y_true, y_pred, num_classes):
     """Calculate Frequency Weighted IoU."""
     ious = calculate_iou(y_true, y_pred, num_classes)
@@ -107,6 +119,8 @@ def test_model(model_name, with_metrics=True):
     Returns:
         dict: Test results and metrics
     """
+    from utils.hardware_check import print_hardware_status
+    print_hardware_status(f"Testing Model: {model_name.upper()}")
     
     ################################# Loading Variables and Paths from Config #################################
 
@@ -118,7 +132,7 @@ def test_model(model_name, with_metrics=True):
     patch_size = slice_config['vars']['patch_size']
     encoder = slice_config['vars']['encoder']
     encoder_weights = slice_config['vars']['encoder_weights']
-    classes = slice_config['vars']['test_classes']
+    classes = ['background'] + slice_config['vars']['test_classes']
     device = slice_config['vars']['device']
     model_arch = slice_config['vars']['model_arch']
 
@@ -444,18 +458,16 @@ def test_model(model_name, with_metrics=True):
                 for i, class_name in enumerate(classes):
                     overall_metrics['per_class_dice'][class_name] = dice_scores[i]
                 
-                # Simple mAP calculation (using precision as proxy)
+                # mAP calculation (using precision as proxy for semantic segmentation)
                 map_scores = []
                 for i in range(num_classes):
-                    true_mask = (all_gt_masks == i)
-                    pred_mask = (all_pred_masks == i)
-                    tp = np.logical_and(true_mask, pred_mask).sum()
-                    fp = np.logical_and(~true_mask, pred_mask).sum()
-                    precision = float(tp) / float(tp + fp) if (tp + fp) > 0 else 0.0
+                    precision = calculate_precision_proxy(all_gt_masks, all_pred_masks, i)
                     map_scores.append(precision)
                 
-                overall_metrics['map_50'] = np.mean(map_scores)
-                overall_metrics['map_75'] = np.mean(map_scores) * 0.8  # Approximation
+                overall_metrics['mAP'] = np.mean(map_scores)
+                overall_metrics['per_class_mAP'] = {}
+                for i, class_name in enumerate(classes):
+                    overall_metrics['per_class_mAP'][class_name] = map_scores[i]
                 
                 all_metrics['overall_metrics'] = overall_metrics
                 

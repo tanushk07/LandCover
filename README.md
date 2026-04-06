@@ -10,6 +10,7 @@
 
 ## 📚 Table of Contents
 - [Overview](#overview)
+- [Directory Structure](#directory-structure)
 - [Demo](#demo)
 - [Getting Started](#getting-started)
   - [Prerequisites](#prerequisites)
@@ -24,6 +25,28 @@
 An end-to-end Computer Vision project focused on Image Segmentation (specifically Semantic Segmentation). Originally built with the LandCover.ai dataset, the project provides a flexible template that can be applied to train models on any semantic segmentation dataset. 
 
 It leverages modern architectures (UNet, DeepLabV3+, Transformer-based models, etc.) via `segmentation-models-pytorch` and `timm`, providing deep customizability through configuration files. You can train on full multiclass datasets and prompt the model at inference time to predict specific selective classes of interest (e.g., passing `test_classes = ['parking']` to extract only the parking zones).
+
+----
+
+## 📂 Directory Structure <a name="directory-structure"></a>
+
+```text
+LandCover/
+├── assets/                     # Images and static assets
+├── config/                     # Model and training configurations
+├── data/                       # Contains dataset (e.g., train/ and test/)
+├── notebooks/                  # Jupyter notebooks for data exploration
+├── src/                        # Main source code logic
+│   ├── utils/                  # Helper modules and functions
+│   ├── compare_models.py       # Compare multiple models performance
+│   ├── inference.py            # Run inference on new images
+│   ├── test_models.py          # Test specific models framework
+│   └── train_model.py          # Main model training script
+├── activate_env.sh             # Activates virtual environment and shows commands
+├── Dockerfile                  # Docker setup for the project
+├── requirements.txt            # Python dependencies
+└── README.md                   # Project documentation
+```
 
 ----
 
@@ -72,9 +95,15 @@ conda activate segment_env
 ```
 
 3. **Install PyTorch:**
-Install PyTorch explicitly according to your hardware. The command below installs the CPU-only version. To use your NVIDIA GPU, visit [pytorch.org](https://pytorch.org/get-started/locally/) and choose the correct command (e.g., checking for CUDA 11.8 or 12.1).
+PyTorch distribution varies heavily depending on whether you plan to use an NVIDIA GPU or just compute on your CPU. To ensure proper Hardware/CUDA utilization during training:
 
-*Example (Windows/Linux CPU-only):*
+*Example for NVIDIA GPU (CUDA 12.1/12.4):*
+```shell
+pip install torch torchvision torchaudio
+```
+*(By default, standard pip installation on PyPI retrieves the fully loaded CUDA setup! Run this to use your RTX/GTX GPU.)*
+
+*Example for CPU-only (if you DO NOT have a GPU):*
 ```shell
 pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
 ```
@@ -118,20 +147,19 @@ From your project's root directory, you can utilize the scripts located in the `
 
 1. **Training the model:**
 ```shell
-python src/train.py
+python src/train_model.py --model unet
 ```
 2. **Testing the model (with images and ground-truth masks):**
 ```shell
-python src/test.py
+python src/test_models.py --model unet
 ```
 3. **Inference (predicting on new images without masks):**
 ```shell
 python src/inference.py
 ```
-4. **Compare Models / Quick Setup (Demo):**
+4. **Compare Models:**
 ```shell
-python setup_quick_demo.py
-python src/compare_models.py --models unet_demo deeplabv3_demo linknet_demo fpn_demo
+python src/compare_models.py --models unet deeplabv3 linknet
 ```
 
 ----

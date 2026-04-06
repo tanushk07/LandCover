@@ -4,7 +4,7 @@ def get_training_augmentation():
     train_transform = [
         album.HorizontalFlip(p=0.5),
         album.VerticalFlip(p=0.5),
-        album.ShiftScaleRotate(scale_limit=1.5, rotate_limit=45, shift_limit=0.1, p=1, border_mode=0),
+        album.ShiftScaleRotate(scale_limit=0.5, rotate_limit=45, shift_limit=0.1, p=1, border_mode=0),
         album.Perspective(p=0.5),
         album.OneOf([
             album.GaussNoise(p=1),

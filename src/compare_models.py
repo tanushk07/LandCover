@@ -69,6 +69,8 @@ def compare_models(models_to_compare, test_only=False, save_results=True):
     Returns:
         dict: Comparison results
     """
+    from utils.hardware_check import print_hardware_status
+    print_hardware_status("Model Comparison Phase")
 
     print("🚀 Starting Model Architecture Comparison")
     print("=" * 60)

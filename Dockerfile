@@ -24,5 +24,5 @@ COPY ./src ./src
 
 # command to run on container start
 # comment and uncomment either of the following lines based on whether to train or test the model
-CMD [ "python", "./src/test.py" ]
-# CMD [ "python", "./src/train.py" ]
+CMD [ "python", "./src/train_model.py", "--model", "unet" ]
+# CMD [ "python", "./src/test_models.py", "--model", "unet" ]

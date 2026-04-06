@@ -1,25 +1,125 @@
-# Ignore data, training/testing outputs, models, logs, virtual environment, caches, and system files
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
 
+# C extensions
+*.so
+
+# Distribution / packaging
+# .Python
+# build/
+# develop-eggs/
+# dist/
+# downloads/
+# eggs/
+# .eggs/
+# lib/
+# lib64/
+# parts/
+# sdist/
+# var/
+# wheels/
+# pip-wheel-metadata/
+# share/python-wheels/
+# *.egg-info/
+# .installed.cfg
+# *.egg
+# MANIFEST
+
+# PyInstaller
+#  Used by designers to package your Python code
+*.manifest
+*.spec
+
+# Installer logs
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Unit test / coverage reports
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+.pytest_cache/
+
+# Translations
+*.mo
+*.pot
+
+# Django stuff:
+*.log
+local_settings.py
+db.sqlite3
+db.sqlite3-journal
+
+# Flask stuff:
+instance/
+.webassets-cache
+
+# Scrapy stuff:
+.scrapy
+
+# Sphinx documentation
+docs/_build/
+
+# PyBuilder
+target/
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# IPython
+profile_default/
+ipython_config.py
+
+# pyenv
+.python-version
+
+# pipenv
+#   According to pypa/pipenv#1181, it is recommended to include Pipfile.lock in version control.
+#   However, in case of collaboration, if participants have different OS, Pipfile.lock will be different.
+# Pipfile.lock
+
+# PEP 582; used by e.g. pdm
+__pypackages__/
+
+# Celery stuff
+celerybeat-schedule
+celerybeat.pid
+
+# SageMath stuff
+*.sage.py
+
+# Environments
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+segment_env/
+
+# LandCover Specific Data and Outputs
 data/
 output/
 logs/
 models/
-venv/
-tmp_env/
-__pycache__/
-*.pyc
-*.pyo
-*.pyd
-*.DS_Store
-*.egg-info/
-*.log
 
-# Allow core code and configs
-!src/**
-!config/**
-!notebooks/**
-!README.md
-!requirements.txt
-!*.sh
-!*.py
-!Dockerfile
+# OS Specific
+.DS_Store
+Thumbs.db
+
+# Knowledge and assistant internals
+knowledge/
+.gemini/
+.agent/
+.agents/
