@@ -19,7 +19,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy the content from the local directory to the working directory
 COPY ./config ./config
 COPY ./data ./data
-COPY ./models ./models
+RUN mkdir -p ./models
 COPY ./src ./src
 
 # command to run on container start
